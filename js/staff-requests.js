@@ -119,6 +119,10 @@ window.initializeStaffRequests = () => {
   const detailSkip = new Set(["fullName", "studentNumber", "program", "yearLevel", "semester", "purpose", "appointmentDate", "appointmentDateLabel", "appointmentStart", "appointmentEnd", "appointmentTimeRange", "appointmentEndNextDay"]);
 
   let query = "";
+  let studentScope = "";
+  const scopeNotice = document.createElement("p");
+  scopeNotice.className = "demo-note";
+  feedback.before(scopeNotice);
   let statusFilter = "all";
   let documentFilter = "all";
   let sortOrder = "newest";
@@ -205,7 +209,7 @@ window.initializeStaffRequests = () => {
       const matchesStatus = statusFilter === "all" || request.status === statusFilter;
       const matchesDocument = documentFilter === "all" || request.documentType === documentFilter;
       const haystack = [request.id, request.studentName, request.studentNumber, request.documentType, request.purpose].join(" ").toLowerCase();
-      return matchesStatus && matchesDocument && (!text || haystack.includes(text));
+      return matchesStatus && matchesDocument && (!text || haystack.includes(text)) && (!studentScope || request.studentNumber === studentScope && service.isActive(request.status));
     });
     if (sortOrder === "oldest") return list.sort((first, second) => new Date(first.submittedAt) - new Date(second.submittedAt));
     if (sortOrder === "student") return list.sort((first, second) => first.studentName.localeCompare(second.studentName, "en", { sensitivity: "base" }));
@@ -221,6 +225,7 @@ window.initializeStaffRequests = () => {
   }
 
   function renderTable() {
+    scopeNotice.textContent = studentScope ? `Active requests for student ${studentScope}. Use Reset filters to view all requests.` : "";
     const filtered = filteredRequests();
     const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
     currentPage = Math.min(Math.max(1, currentPage), totalPages);
@@ -353,6 +358,18 @@ window.initializeStaffRequests = () => {
 
   function renderDetailActions(request) {
     detailsActions.replaceChildren();
+    if ([statuses.APPROVED, statuses.PROCESSING, statuses.READY].includes(request.status)) {
+      const link = document.createElement("button");
+      link.type = "button";
+      link.className = "primary-button";
+      link.textContent = "Open Document Processing & Release";
+      link.addEventListener("click", () => {
+        detailsDialog.close();
+        document.dispatchEvent(new CustomEvent("portal:documentopen", { detail: request.id }));
+      });
+      detailsActions.append(link);
+      return;
+    }
     const allowed = actionOrder.filter((target) => target !== statuses.CANCELLED && service.canTransition(request.status, target));
     if (!allowed.length) {
       const message = document.createElement("p");
@@ -402,6 +419,15 @@ window.initializeStaffRequests = () => {
     renderDetailMessages(request);
     renderDetailHistory(request);
     renderDetailActions(request);
+    const studentLink = document.createElement("button");
+    studentLink.type = "button";
+    studentLink.className = "secondary-button";
+    studentLink.textContent = "View Student Record";
+    studentLink.addEventListener("click", () => {
+      detailsDialog.close();
+      document.dispatchEvent(new CustomEvent("portal:studentrecordopen", { detail: { studentNumber: request.studentNumber, origin: { type: "request", id: request.id } } }));
+    });
+    detailsActions.append(studentLink);
     const appointment = appointmentService.getByRequest(request.id);
     if (appointment) {
       const link = document.createElement("button");
@@ -455,6 +481,7 @@ window.initializeStaffRequests = () => {
   }
 
   function resetFilters() {
+    studentScope = "";
     query = "";
     statusFilter = "all";
     documentFilter = "all";
@@ -585,6 +612,11 @@ window.initializeStaffRequests = () => {
   document.addEventListener("portal:staffrequestopen", (event) => {
     if (context.current()) openRequest(event.detail);
   });
+  document.addEventListener("portal:studentrequests", (event) => {
+    if (!context.current()) return;
+    resetFilters(); studentScope = event.detail; currentPage = 1;
+    context.navigate("staff-requests"); renderTable();
+  });
 
   document.addEventListener("portal:requestschanged", () => {
     if (!context.current()) return;
@@ -604,6 +636,7 @@ window.initializeStaffRequests = () => {
   });
 
   document.addEventListener("portal:logout", () => {
+    studentScope = ""; scopeNotice.textContent = "";
     if (detailsDialog.open) detailsDialog.close();
     if (actionDialog.open) actionDialog.close();
     selectedRequestId = "";

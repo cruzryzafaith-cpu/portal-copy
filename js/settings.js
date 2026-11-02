@@ -178,9 +178,7 @@ window.initializePortalSettings = () => {
   function applyPreferences() {
     applyTheme();
     preferenceInputs.forEach((input) => { input.checked = preferences[input.name]; });
-    const notificationButton = document.querySelector(".notification-button");
-    notificationButton.querySelector("span").hidden = !preferences.announcementAlerts;
-    notificationButton.setAttribute("aria-label", preferences.announcementAlerts ? "Announcements, 1 new notification" : "Announcements");
+    document.dispatchEvent(new CustomEvent("portal:announcementpreferences", { detail: { enabled: preferences.announcementAlerts } }));
     document.querySelector(".suggested-questions").hidden = !preferences.assistantTips;
     if (!preferences.requestUpdates) notice.hidden = true;
   }
@@ -195,9 +193,9 @@ window.initializePortalSettings = () => {
     preferences = { ...defaults };
     if (account) {
       try {
-        const saved = JSON.parse(window.localStorage.getItem(`rtu.portal.settings.${encodeURIComponent(account.accountNumber)}`));
+        const saved = JSON.parse(window.localStorage.getItem(accounts.preferencesKey(account)));
         Object.keys(defaults).forEach((key) => {
-          if (typeof saved?.[key] === "boolean") preferences[key] = saved[key];
+          if ((!saved?.ownerRole || saved.ownerRole === "student") && typeof saved?.[key] === "boolean") preferences[key] = saved[key];
         });
       } catch {
         // Use this account's defaults if browser preferences cannot be read.
@@ -210,7 +208,9 @@ window.initializePortalSettings = () => {
 
   function savePreferences() {
     try {
-      window.localStorage.setItem(`rtu.portal.settings.${encodeURIComponent(account.accountNumber)}`, JSON.stringify(preferences));
+      const key = accounts.preferencesKey(account); const existing = JSON.parse(window.localStorage.getItem(key) || "{}");
+      if (existing.ownerRole && existing.ownerRole !== "student") throw new Error("Account preference owner mismatch.");
+      window.localStorage.setItem(key, JSON.stringify({ ...preferences, ownerRole: "student" }));
       setStatus("Auto-saved: Just now");
     } catch {
       setStatus("Preferences apply for this visit. Browser storage is unavailable.");
@@ -230,8 +230,7 @@ window.initializePortalSettings = () => {
       if (!account) return;
       preferenceInputs.forEach((input) => { preferences[input.name] = input.checked; });
       savePreferences();
-      if (preferences.rememberSession) accounts.saveSession(account);
-      else accounts.clearSession();
+      accounts.setSessionPersistence(preferences.rememberSession, account);
     });
   });
 

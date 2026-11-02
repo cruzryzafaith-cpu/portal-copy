@@ -7,6 +7,7 @@
       <button class="settings-tab" id="settings-tab-password" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-password" tabindex="-1" data-settings-tab="password">Change Password</button>
       <button class="settings-tab" id="settings-tab-notifications" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-notifications" tabindex="-1" data-settings-tab="notifications">Notification Settings</button>
       <button class="settings-tab" id="settings-tab-privacy" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-privacy" tabindex="-1" data-settings-tab="privacy">Privacy and Security</button>
+      <button class="settings-tab" id="settings-tab-terms" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-terms" tabindex="-1" data-settings-tab="terms">Terms of Service</button>
     </div>
     <div class="settings-workspace">
       <section class="settings-panel" id="settings-panel-account" role="tabpanel" aria-labelledby="settings-tab-account" data-settings-panel="account">
@@ -53,6 +54,25 @@
           <form class="settings-preferences" id="privacy-settings-form"><label class="settings-switch"><span><strong>Keep me signed in on refresh</strong><small>Remember your sign-in in this tab until you log out.</small></span><input name="rememberSession" type="checkbox" role="switch" checked></label></form>
           <div class="settings-session"><h4>Current account</h4><p><strong data-profile-name>Juan Dela Cruz</strong><br>Student ID: <span data-profile-student-number>2023-103319</span></p><p>Your demo account, profile, and preferences are saved in this browser.</p><button class="secondary-button" id="settings-logout-button" type="button">Log out of this tab</button></div>
         </details>
+      </section>
+      <section class="settings-panel settings-privacy-panel" id="settings-panel-terms" role="tabpanel" aria-labelledby="settings-tab-terms" data-settings-panel="terms" hidden>
+        <h3>Terms of Service</h3>
+        <div class="settings-policy">
+          <h4>Acceptance of Terms</h4>
+          <p>By creating an account or using the Academic Services &amp; Records Assistant of Rizal Technological University – Pasig Campus (the Portal), you agree to these Terms of Service and to the Privacy Policy. If you do not agree, do not use the Portal.</p>
+          <h4>Eligibility and Accounts</h4>
+          <p>Student accounts are intended for students using their real institutional details. Staff accounts are provisioned by the Academic Services Office. You are responsible for keeping your password confidential and for all activity under your account.</p>
+          <h4>Accurate Information and Acceptable Use</h4>
+          <p>You must provide accurate registration details and confirm the correctness of information submitted in document requests. You must not misuse the Portal, submit fraudulent requests or appointments, impersonate another person, or disclose another student&rsquo;s confidential information.</p>
+          <h4>Document Requests and Appointments</h4>
+          <p>Requests follow the published review-to-release workflow, and appointments are subject to availability and staff confirmation. Documents are released only to the requester upon identity verification.</p>
+          <h4>Privacy</h4>
+          <p>The collection, use, and protection of personal data are governed by the Privacy Policy, in accordance with the Data Privacy Act of 2012 (Republic Act No. 10173) and applicable university policies.</p>
+          <h4>No Official Guarantee</h4>
+          <p>This Portal is a demonstration build. It does not replace official university systems, and entries made here do not constitute official academic records. To the maximum extent permitted by law, the university is not liable for damages arising from the use of the Portal. These terms may be updated; continued use constitutes acceptance.</p>
+          <h4>Contact</h4>
+          <p>For questions about these terms, contact the Academic Services Office, Rizal Technological University – Pasig Campus, or use the Help &amp; Support section of the Portal. The full text is also available from the login screen and the account menu.</p>
+        </div>
       </section>
       <button class="settings-assistant" type="button" data-assistant="How can you help me?"><span class="settings-assistant-hint">Questions? Chat with me!</span><img src="assets/images/assistant.svg" alt="" width="34" height="40"><span>RTU AI ASSISTANT</span></button>
     </div>

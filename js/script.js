@@ -6,6 +6,7 @@ window.initializePortalLogin = () => {
   const accountInput = document.querySelector("#account-number");
   const passwordInput = document.querySelector("#password");
   const passwordToggle = document.querySelector("#password-toggle");
+  const consentInput = document.querySelector("#privacy-consent");
   const loginStatus = document.querySelector("#login-status");
   const registerPrompt = document.querySelector("#register-prompt");
   const provisionNote = document.querySelector("#staff-provision-note");
@@ -18,14 +19,16 @@ window.initializePortalLogin = () => {
     student: {
       title: "Student Login",
       accountLabel: "Student Number",
-      description: "Sign in to access your academic services,<br class=\"desktop-break\"> records, and more.",
+      example: "e.g. 2020-12345",
+      description: ["Sign in to access your academic services,", " records, and more."],
       registerTitle: "Create a student account",
     },
     staff: {
       title: "Staff Login",
       accountLabel: "Employee Number",
-      description: "Sign in to manage academic services,<br class=\"desktop-break\"> records, and requests.",
-      registerTitle: "Create a staff account",
+      example: "e.g. 2020-123456",
+      description: ["Sign in to manage academic services,", " records, and requests."],
+      registerTitle: "Staff accounts are provisioned",
     },
   };
 
@@ -53,9 +56,12 @@ window.initializePortalLogin = () => {
     });
 
     document.querySelector("#login-title").textContent = details.title;
-    document.querySelector("#login-description").innerHTML = details.description;
+    const description = document.querySelector("#login-description");
+    const breakElement = document.createElement("br");
+    breakElement.className = "desktop-break";
+    description.replaceChildren(document.createTextNode(details.description[0]), breakElement, document.createTextNode(details.description[1]));
     document.querySelector("#account-label").textContent = details.accountLabel;
-    accountInput.placeholder = details.accountLabel;
+    accountInput.placeholder = details.example;
     document.querySelector("#register-title").textContent = details.registerTitle;
     document.querySelector("#register-number-label").textContent = details.accountLabel;
     registerPrompt.hidden = role !== "student";
@@ -65,6 +71,7 @@ window.initializePortalLogin = () => {
     hidePassword();
     setFieldError(accountInput, "");
     setFieldError(passwordInput, "");
+    setFieldError(consentInput, "");
     loginStatus.textContent = "";
     window.PortalMotion.enter(document.querySelector(".login-heading"));
     window.PortalMotion.enter(loginForm);
@@ -75,6 +82,8 @@ window.initializePortalLogin = () => {
   });
 
   if (window.location.hash.startsWith("#/staff/")) setRole("staff");
+  document.addEventListener("portal:loginrequired", (event) => { if (!["student", "staff"].includes(event.detail.role)) return; setRole(event.detail.role); passwordInput.value = ""; hidePassword(); loginStatus.textContent = event.detail.message || ""; });
+  document.addEventListener("portal:sessioninvalidated", (event) => { if (!document.querySelector("#login-screen").hidden && ["student", "staff"].includes(event.detail.role)) { setRole(event.detail.role); passwordInput.value = ""; hidePassword(); loginStatus.textContent = event.detail.message; } });
 
   passwordToggle.addEventListener("click", () => {
     const visible = passwordInput.type === "password";
@@ -90,6 +99,11 @@ window.initializePortalLogin = () => {
     });
   });
 
+  consentInput.addEventListener("change", () => {
+    if (consentInput.checked) setFieldError(consentInput, "");
+    loginStatus.textContent = "";
+  });
+
   loginForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (loginPending) return;
@@ -99,11 +113,13 @@ window.initializePortalLogin = () => {
       ? ""
       : `Please enter your ${roles[activeRole].accountLabel.toLowerCase()}.`;
     const passwordError = passwordInput.value ? "" : "Please enter your password.";
+    const consentError = consentInput.checked ? "" : "Please confirm that you have read the Data Privacy Statement.";
     setFieldError(accountInput, accountError);
     setFieldError(passwordInput, passwordError);
+    setFieldError(consentInput, consentError);
 
-    if (accountError || passwordError) {
-      (accountError ? accountInput : passwordInput).focus();
+    if (accountError || passwordError || consentError) {
+      (accountError ? accountInput : passwordError ? passwordInput : consentInput).focus();
       return;
     }
 
@@ -133,16 +149,20 @@ window.initializePortalLogin = () => {
   });
 
   document.querySelectorAll("[data-open-dialog]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
+      if (button.tagName === "A") event.preventDefault();
       const dialog = document.getElementById(button.dataset.openDialog);
-      dialog.querySelector("form").reset();
+      const form = dialog.querySelector("form");
+      if (form) form.reset();
       dialog.querySelectorAll("[aria-invalid]").forEach((input) => input.removeAttribute("aria-invalid"));
       const status = dialog.querySelector(".dialog-status");
-      if (!status) return;
-      status.textContent = "";
-      status.classList.remove("is-success");
+      if (status) {
+        status.textContent = "";
+        status.classList.remove("is-success");
+      }
       dialog.showModal();
-      dialog.querySelector("input").focus();
+      const focusTarget = dialog.querySelector("input, .dialog-close");
+      if (focusTarget) focusTarget.focus();
     });
   });
 
@@ -171,7 +191,7 @@ window.initializePortalLogin = () => {
   function validateDialog(form, status) {
     let firstInvalid = null;
 
-    form.querySelectorAll("input").forEach((input) => {
+    form.querySelectorAll("input, select").forEach((input) => {
       const blank = !input.value.trim();
       const valid = !blank && input.checkValidity();
       input.setAttribute("aria-invalid", String(!valid));
@@ -184,6 +204,8 @@ window.initializePortalLogin = () => {
     status.classList.remove("is-success");
     if (!firstInvalid.value.trim()) {
       status.textContent = `Please enter your ${label.toLowerCase()}.`;
+    } else if (firstInvalid.type === "checkbox") {
+      status.textContent = "Please agree to the Terms & Conditions to continue.";
     } else if (firstInvalid.validity.typeMismatch) {
       status.textContent = "Please enter a valid email address.";
     } else if (firstInvalid.validity.tooShort) {
@@ -200,8 +222,8 @@ window.initializePortalLogin = () => {
     event.preventDefault();
     const status = document.querySelector("#recovery-status");
     if (!validateDialog(recoveryForm, status)) return;
-    status.classList.add("is-success");
-    status.textContent = "Reset request preview complete. A connected email service would send your recovery link. No email was sent in this demo.";
+    status.classList.remove("is-success");
+    status.textContent = "Recovery is a development preview only. No password was reset, and no recovery email, link or token was sent. A secure authentication provider is required for account recovery.";
   });
 
   const registerForm = document.querySelector("#register-form");
@@ -211,7 +233,7 @@ window.initializePortalLogin = () => {
     const status = document.querySelector("#register-status");
     if (!validateDialog(registerForm, status)) return;
     if (activeRole !== "student") {
-      status.textContent = "Staff accounts are provisioned by the Academic Services Office. Choose Student to create a student account.";
+      status.textContent = "Staff accounts require an authorized provisioning process. Public staff registration is unavailable. Choose Student to create a student account.";
       return;
     }
     const submitButton = registerForm.querySelector('[type="submit"]');
@@ -225,6 +247,8 @@ window.initializePortalLogin = () => {
         accountNumber: registerForm.elements.accountNumber.value,
         email: registerForm.elements.email.value,
         password: registerForm.elements.newPassword.value,
+        college: registerForm.elements.college.value,
+        program: registerForm.elements.program.value,
       });
       registerForm.reset();
       document.querySelector("#register-dialog").close();

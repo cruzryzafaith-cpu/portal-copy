@@ -197,7 +197,7 @@
         to: { date: entry?.to?.date || "", start: entry?.to?.start || "", end: entry?.to?.end || "" },
         reason: typeof entry?.reason === "string" ? entry.reason : "",
         staff: typeof entry?.staff === "string" ? entry.staff : "",
-        timestamp: typeof entry?.timestamp === "string" ? entry.timestamp : new Date().toISOString(),
+        timestamp: typeof entry?.timestamp === "string" ? entry.timestamp : "",
       })),
       history: history.map((entry) => ({
         action: typeof entry?.action === "string" ? entry.action : "Status Updated",
@@ -206,7 +206,7 @@
         actor: typeof entry?.actor === "string" ? entry.actor : "",
         actorRole: entry?.actorRole === "staff" ? "staff" : "",
         remarks: typeof entry?.remarks === "string" ? entry.remarks : "",
-        timestamp: typeof entry?.timestamp === "string" ? entry.timestamp : new Date().toISOString(),
+        timestamp: typeof entry?.timestamp === "string" ? entry.timestamp : "",
       })),
       demo: appointment.demo !== false,
     };
@@ -317,7 +317,8 @@
   }
 
   function updateRecord(id, updater, actor) {
-    if (actor?.role !== "staff" || !String(actor?.name || "").trim()) throw new Error("Only an authorized staff member can perform this action.");
+    const currentAccount = window.PortalStaffContext?.current()?.account;
+    if (actor?.role !== "staff" || !String(actor?.name || "").trim() || currentAccount?.role !== "staff" || actor.accountNumber !== currentAccount.accountNumber) throw new Error("Only an active authorized staff member can perform this action.");
     const all = listAll();
     const index = all.findIndex((appointment) => appointment.id === id);
     if (index === -1) throw new Error("This appointment could not be found.");
@@ -514,7 +515,17 @@
     return String(actor?.name || actor?.fullName || "").trim();
   }
 
+  function sourceInfo() {
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (raw === null) return { available: true };
+      const records = JSON.parse(raw);
+      return { available: Array.isArray(records) && records.every((record) => record && typeof record.id === "string" && typeof record.requestId === "string" && isStatus(record.status)) };
+    } catch { return { available: false }; }
+  }
+
   window.PortalAppointmentService = Object.freeze({
+    sourceInfo,
     STORAGE_KEY,
     STATUS,
     STATUSES,

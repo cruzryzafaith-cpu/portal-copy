@@ -89,6 +89,11 @@ window.initializeStaffAppointments = () => {
   let cursor = new Date();
   let selectedDate = service.manilaDate();
   let query = "";
+  let studentScope = "";
+  let pendingOpenId = "";
+  const scopeNotice = document.createElement("p");
+  scopeNotice.className = "demo-note";
+  feedback.before(scopeNotice);
   let dateQuery = "";
   let serviceQuery = "all";
   let statusQuery = "all";
@@ -151,7 +156,7 @@ window.initializeStaffAppointments = () => {
   }
 
   function appointmentsForDate(date) {
-    return service.listAll().filter((appointment) => appointment.date === date).sort((first, second) => first.start.localeCompare(second.start));
+    return scopedAppointments().filter((appointment) => appointment.date === date).sort((first, second) => first.start.localeCompare(second.start));
   }
 
   function renderSummary() {
@@ -215,7 +220,7 @@ window.initializeStaffAppointments = () => {
       grid.append(header);
     });
     const countsByDate = new Map();
-    service.listAll().forEach((appointment) => {
+    scopedAppointments().forEach((appointment) => {
       countsByDate.set(appointment.date, (countsByDate.get(appointment.date) || 0) + 1);
     });
     for (let index = 0; index < 42; index += 1) {
@@ -314,7 +319,7 @@ window.initializeStaffAppointments = () => {
 
   function filteredAppointments() {
     const text = query.trim().toLowerCase();
-    const list = service.listAll().filter((appointment) => {
+    const list = scopedAppointments().filter((appointment) => {
       const matchesSearch = !text || [appointment.id, appointment.studentName, appointment.studentNumber, appointment.serviceType].join(" ").toLowerCase().includes(text);
       const matchesDate = !dateQuery || appointment.date === dateQuery;
       const matchesService = serviceQuery === "all" || appointment.serviceType === serviceQuery;
@@ -327,6 +332,7 @@ window.initializeStaffAppointments = () => {
   }
 
   function renderTable() {
+    scopeNotice.textContent = studentScope ? `Appointments for student ${studentScope}. Use Reset filters to view all appointments.` : "";
     const filtered = filteredAppointments();
     const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
     currentPage = Math.min(Math.max(1, currentPage), totalPages);
@@ -513,6 +519,26 @@ window.initializeStaffAppointments = () => {
       ? "Availability not configured"
       : `${availability.status}: ${availability.booked} of ${availability.capacity} booked, ${availability.remaining} remaining.`;
     renderActions(appointment);
+    const studentLink = document.createElement("button");
+    studentLink.type = "button";
+    studentLink.className = "secondary-button";
+    studentLink.textContent = "View Student Record";
+    studentLink.addEventListener("click", () => {
+      detailsDialog.close();
+      document.dispatchEvent(new CustomEvent("portal:studentrecordopen", { detail: { studentNumber: appointment.studentNumber, origin: { type: "appointment", id: appointment.id } } }));
+    });
+    actionsContainer.append(studentLink);
+    if (request && [requestService.STATUS.APPROVED, requestService.STATUS.PROCESSING, requestService.STATUS.READY, requestService.STATUS.RELEASED].includes(request.status)) {
+      const processingLink = document.createElement("button");
+      processingLink.type = "button";
+      processingLink.className = "secondary-button";
+      processingLink.textContent = "Open Document Processing & Release";
+      processingLink.addEventListener("click", () => {
+        detailsDialog.close();
+        document.dispatchEvent(new CustomEvent("portal:documentopen", { detail: request.id }));
+      });
+      actionsContainer.append(processingLink);
+    }
     if (!detailsDialog.open) detailsDialog.showModal();
     detailsTitle.focus({ preventScroll: true });
   }
@@ -596,6 +622,7 @@ window.initializeStaffAppointments = () => {
   }
 
   function resetFilters() {
+    studentScope = "";
     query = "";
     dateQuery = "";
     serviceQuery = "all";
@@ -710,6 +737,20 @@ window.initializeStaffAppointments = () => {
   document.addEventListener("portal:staffpagechange", (event) => {
     if (event.detail !== "staff-appointments" || !context.current()) return;
     renderAll();
+    if (pendingOpenId) { const id = pendingOpenId; pendingOpenId = ""; openAppointment(id); }
+  });
+  function scopedAppointments() {
+    return service.listAll().filter((appointment) => !studentScope || appointment.studentNumber === studentScope);
+  }
+  document.addEventListener("portal:appointmentopen", (event) => {
+    if (!context.current()) return;
+    pendingOpenId = event.detail;
+    context.navigate("staff-appointments");
+  });
+  document.addEventListener("portal:studentappointments", (event) => {
+    if (!context.current()) return;
+    resetFilters(); studentScope = event.detail;
+    context.navigate("staff-appointments"); renderAll();
   });
   document.addEventListener("portal:requestschanged", () => {
     if (context.current()) renderAll();
@@ -721,6 +762,7 @@ window.initializeStaffAppointments = () => {
     if (context.current() && staffScreen.dataset.currentPage === "staff-appointments") renderAll();
   });
   document.addEventListener("portal:logout", () => {
+    studentScope = ""; pendingOpenId = ""; scopeNotice.textContent = "";
     if (detailsDialog.open) detailsDialog.close();
     if (actionDialog.open) actionDialog.close();
     selectedAppointmentId = "";

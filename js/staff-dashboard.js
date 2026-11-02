@@ -2,6 +2,7 @@
 
 window.initializeStaffDashboard = () => {
   const accounts = window.PortalAccounts;
+  const accountService = window.PortalStaffAccountService;
   const requestService = window.PortalRequestService;
   const appointmentService = window.PortalAppointmentService;
   const routes = window.PortalStaffRoutes;
@@ -41,79 +42,33 @@ window.initializeStaffDashboard = () => {
   const staffNotificationInputs = [...staffNotificationForm.querySelectorAll("input[name]")];
   const staffSessionForm = document.querySelector("#staff-session-form");
   const staffSessionInput = staffSessionForm.elements.rememberSession;
-  const announcementForm = document.querySelector("#staff-announcement-form");
-  const announcementStatus = document.querySelector("#staff-announcement-status");
-  const recordRows = document.querySelector("#staff-record-rows");
-  const recordRequests = document.querySelector("#staff-record-requests");
 
   const pageTitles = Object.freeze({
     "staff-dashboard": "Staff Workspace",
     "staff-requests": "Request Management",
     "staff-appointments": "Appointment Management",
-    "staff-records": "Student Records",
-    "staff-announcements": "Announcements",
-    "staff-profile": "My Profile",
-    "staff-settings": "Settings",
+    "staff-document-processing": "Document Processing & Release",
+    "staff-records": "Student Records Management",
+    "staff-announcements": "Announcements Management",
+    "staff-reports": "Reports & Analytics",
+    "staff-help-support": "Help & Support Management",
+    "staff-profile": "My Staff Profile",
+    "staff-settings": "Account Settings",
   });
-  const storageKeys = Object.freeze({
-    announcements: "rtu.portal.staff.announcements",
-  });
-  const defaultPreferences = Object.freeze({
-    requestAlerts: true,
-    announcementAlerts: true,
-    shiftReminders: true,
-    rememberSession: true,
-    darkMode: false,
-  });
-  const sampleStudents = Object.freeze([
-    { accountNumber: "2023-103319", fullName: "Juan Dela Cruz", email: "2023-103319@rtu.edu.ph", phoneNumber: "0999199192", yearLevel: "3rd Year", program: "BSIT", semester: "1st Semester", status: "Enrolled", source: "Registrar reference record" },
-    { accountNumber: "2022-104521", fullName: "Maria Santos", email: "2022-104521@rtu.edu.ph", phoneNumber: "09171234567", yearLevel: "4th Year", program: "BSBA", semester: "1st Semester", status: "Graduating", source: "Registrar reference record" },
-    { accountNumber: "2024-100872", fullName: "Alex Reyes", email: "2024-100872@rtu.edu.ph", phoneNumber: "09281234567", yearLevel: "2nd Year", program: "BSCE", semester: "1st Semester", status: "Enrolled", source: "Registrar reference record" },
-    { accountNumber: "2023-101455", fullName: "Nicole Ramos", email: "2023-101455@rtu.edu.ph", phoneNumber: "09391234567", yearLevel: "3rd Year", program: "BSED", semester: "1st Semester", status: "Enrolled", source: "Registrar reference record" },
-    { accountNumber: "2021-109330", fullName: "Mark Villanueva", email: "2021-109330@rtu.edu.ph", phoneNumber: "09451234567", yearLevel: "4th Year", program: "BSA", semester: "1st Semester", status: "On Leave", source: "Registrar reference record" },
-    { accountNumber: "2025-112004", fullName: "Angela Cruz", email: "2025-112004@rtu.edu.ph", phoneNumber: "09561234567", yearLevel: "1st Year", program: "BSIT", semester: "1st Semester", status: "Enrolled", source: "Registrar reference record" },
-  ]);
+  const defaultPreferences = accountService.DEFAULTS;
 
   let activeAccount = null;
   let staffProfile = null;
   let preferences = { ...defaultPreferences };
-  let announcements = [];
-  let recordQuery = "";
-  let recordProgram = "all";
-  let selectedRecordNumber = "";
+  let acceptedStaffHash = "";
   let pendingRequestOpenId = "";
   let profileEditing = false;
-  let profileSaveTimer;
+  let profileRevision = 0;
+  let profileSaving = false;
   let noticeTimer;
   let desktopSidebarOpen = true;
   let mobileSidebarOpen = false;
   let passwordPending = false;
-
-  function readStorage(key, fallback) {
-    try {
-      const raw = window.localStorage.getItem(key);
-      return raw === null ? fallback : JSON.parse(raw);
-    } catch {
-      return fallback;
-    }
-  }
-
-  function writeStorage(key, value) {
-    try {
-      window.localStorage.setItem(key, JSON.stringify(value));
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  function profileKey(accountNumber) {
-    return `rtu.portal.staffProfile.${encodeURIComponent(accountNumber)}`;
-  }
-
-  function preferencesKey(accountNumber) {
-    return `rtu.portal.settings.${encodeURIComponent(accountNumber)}`;
-  }
 
   function setText(selector, value) {
     const element = document.querySelector(selector);
@@ -149,58 +104,18 @@ window.initializeStaffDashboard = () => {
     return name.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "ST";
   }
 
-  function timestamp(daysAgo, hour, minute) {
-    const date = new Date();
-    date.setDate(date.getDate() - daysAgo);
-    date.setHours(hour, minute, 0, 0);
-    return date.toISOString();
-  }
-
-  function schedule(daysFromNow, hour) {
-    const start = new Date();
-    start.setDate(start.getDate() + daysFromNow);
-    start.setHours(hour, 0, 0, 0);
-    const end = new Date(start.getTime() + 60 * 60 * 1000);
-    return `${formatDate(start)} · ${formatTime(start)} – ${formatTime(end)}`;
-  }
-
-  function demoAnnouncements() {
-    return [
-      { id: "ann-registrar-hours", title: "Registrar's Office hours this week", message: "The Office of the Registrar is open from 8:00 AM to 5:00 PM, Monday to Friday. Students with confirmed schedules are encouraged to arrive ten minutes before their appointment.", audience: "All", createdAt: timestamp(1, 9, 0), author: "Crissabelle Veloso" },
-      { id: "ann-pickup-reminders", title: "Grade slip pick-up reminders", message: "Please bring your student ID and request reference when claiming your grade slip at the Registrar's Office. Unclaimed documents are kept for thirty days.", audience: "Students", createdAt: timestamp(3, 14, 30), author: "Crissabelle Veloso" },
-    ];
-  }
-
-  function loadAnnouncements() {
-    const saved = readStorage(storageKeys.announcements, null);
-    if (Array.isArray(saved) && saved.every((item) => item && typeof item.id === "string" && typeof item.title === "string" && typeof item.message === "string" && typeof item.createdAt === "string")) {
-      return saved;
-    }
-    const seeded = demoAnnouncements();
-    writeStorage(storageKeys.announcements, seeded);
-    return seeded;
-  }
-
-  function saveAnnouncements() {
-    if (!writeStorage(storageKeys.announcements, announcements)) notify("Announcement changes apply for this visit. Browser storage is unavailable.");
-  }
-
   function loadPreferences(account) {
-    const saved = readStorage(preferencesKey(account.accountNumber), {});
-    preferences = { ...defaultPreferences };
-    Object.keys(defaultPreferences).forEach((key) => {
-      if (typeof saved?.[key] === "boolean") preferences[key] = saved[key];
-    });
+    try { preferences = accountService.preferences(); }
+    catch (error) { preferences = { ...defaultPreferences }; setStaffSettingsStatus(error.message, true); }
     applyTheme();
     syncNotificationPreferences();
     syncNotificationUi();
   }
 
-  function savePreferences() {
-    if (!activeAccount) return;
-    if (!writeStorage(preferencesKey(activeAccount.accountNumber), preferences)) {
-      setStaffSettingsStatus("Preferences apply for this visit. Browser storage is unavailable.", true);
-    }
+  function savePreferences(changes) {
+    if (!activeAccount) return false;
+    try { preferences = accountService.savePreferences(changes); applyTheme(); syncNotificationPreferences(); syncNotificationUi(); setStaffSettingsStatus("Preferences saved in this browser."); return true; }
+    catch (error) { syncNotificationPreferences(); applyTheme(); setStaffSettingsStatus(error.message, true); return false; }
   }
 
   function applyTheme() {
@@ -211,6 +126,7 @@ window.initializeStaffDashboard = () => {
     themeToggle.setAttribute("aria-label", label);
     themeToggle.title = label;
     themeIcon.setAttribute("href", dark ? "#icon-sun" : "#icon-moon");
+    document.querySelector("#staff-theme-preference").value = dark ? "dark" : "light";
   }
 
   function syncNotificationPreferences() {
@@ -223,23 +139,30 @@ window.initializeStaffDashboard = () => {
   function syncNotificationUi() {
     const summary = requestService.summary(requestService.listAll());
     const attention = summary.pending + summary.correction;
+    const documentBadge = document.querySelector("#staff-document-badge");
+    const documentAttention = summary[requestService.STATUS.APPROVED] + summary.ready;
+    documentBadge.textContent = String(documentAttention);
+    documentBadge.hidden = !preferences.processingAlerts || documentAttention === 0;
     navBadge.textContent = String(attention);
     navBadge.hidden = attention === 0;
-    notificationCount.textContent = String(attention);
-    notificationCount.hidden = !preferences.requestAlerts || attention === 0;
-    notificationButton.setAttribute("aria-label", `Open Request Management, ${attention} request${attention === 1 ? "" : "s"} needing attention`);
+    const notificationTotal = window.PortalStaffContext?.current() && window.PortalNotifications ? window.PortalNotifications.visible(window.PortalNotifications.list(), preferences).filter((notice) => notice.unread).length : preferences.requestAlerts ? attention : 0;
+    notificationCount.textContent = String(notificationTotal);
+    notificationCount.hidden = notificationTotal === 0;
+    notificationButton.setAttribute("aria-label", `Notifications, ${notificationTotal} unread or requiring attention`);
+    document.dispatchEvent(new CustomEvent("portal:staffnotificationpreferences", { detail: { enabled: preferences.requestAlerts } }));
   }
 
   function syncIdentity() {
     if (!activeAccount) return;
     const name = staffProfile?.fullName || activeAccount.fullName;
-    const position = staffProfile?.position || activeAccount.position || "Staff";
-    const department = staffProfile?.department || activeAccount.department || "Office of the Registrar";
+    const position = activeAccount.position || "Not provided";
+    const department = activeAccount.department || "Not provided";
     const firstName = name.trim().split(/\s+/)[0] || "Staff";
     document.querySelectorAll("[data-staff-name]").forEach((element) => { element.textContent = name; });
     document.querySelectorAll("[data-staff-first-name]").forEach((element) => { element.textContent = firstName; });
     document.querySelectorAll("[data-staff-position]").forEach((element) => { element.textContent = position; });
     document.querySelectorAll("[data-staff-department]").forEach((element) => { element.textContent = department; });
+    document.querySelectorAll("[data-staff-role]").forEach((element) => { element.textContent = "Staff"; });
     document.querySelectorAll("[data-staff-employee-number]").forEach((element) => { element.textContent = activeAccount.accountNumber; });
     document.querySelectorAll("[data-staff-initials]").forEach((element) => { element.textContent = initials(name); });
     document.querySelectorAll("[data-staff-value]").forEach((element) => {
@@ -250,28 +173,15 @@ window.initializeStaffDashboard = () => {
   }
 
   function loadStaffProfile(account) {
-    window.clearTimeout(profileSaveTimer);
-    profileSaveTimer = undefined;
-    const defaults = {
-      fullName: account.fullName,
-      email: account.email,
-      phoneNumber: account.phoneNumber || "",
-      position: account.position || "Academic Services Staff",
-      department: account.department || "Office of the Registrar",
-      officeLocation: account.officeLocation || "",
-      officeHours: account.officeHours || "",
-    };
-    const saved = readStorage(profileKey(account.accountNumber), null);
-    staffProfile = { ...defaults };
-    if (saved?.profile && typeof saved.profile === "object") {
-      Object.keys(defaults).forEach((key) => {
-        if (typeof saved.profile[key] === "string" && saved.profile[key].length <= 254) staffProfile[key] = saved.profile[key];
-      });
-    }
+    try {
+      const saved = accountService.snapshot(); staffProfile = saved.profile; profileRevision = saved.revision;
+      setText("#staff-profile-last-saved", saved.updatedAt ? `Last browser profile save: ${formatDateTime(saved.updatedAt)}. This is not a secure audit history.` : "No saved profile timestamp available.");
+      staffProfileEditButton.disabled = false;
+      setStaffProfileStatus("Read-only profile. Choose Edit Profile to change display name or contact number.");
+    } catch (error) { staffProfile = { ...account, legalName: account.fullName, displayName: "" }; staffProfileEditButton.disabled = true; setStaffProfileStatus(error.message, true); }
     syncStaffProfileForm();
     syncIdentity();
     setStaffProfileEditing(false);
-    setStaffProfileStatus("Auto-save ready");
   }
 
   function syncStaffProfileForm() {
@@ -282,6 +192,8 @@ window.initializeStaffDashboard = () => {
       input.removeAttribute("aria-invalid");
     });
     staffProfileForm.elements.employeeNumber.value = activeAccount.accountNumber;
+    staffProfileForm.elements.legalName.value = activeAccount.fullName || "";
+    staffProfileForm.elements.email.value = activeAccount.email || "";
   }
 
   function setStaffProfileStatus(message, error = false) {
@@ -306,8 +218,6 @@ window.initializeStaffDashboard = () => {
   }
 
   function saveStaffProfile() {
-    window.clearTimeout(profileSaveTimer);
-    profileSaveTimer = undefined;
     if (!activeAccount) return false;
     const invalid = validateStaffProfile();
     if (invalid) {
@@ -315,26 +225,26 @@ window.initializeStaffDashboard = () => {
       return false;
     }
     const values = Object.fromEntries(staffProfileInputs.map((input) => [input.name, input.value.trim()]));
-    staffProfile = { ...staffProfile, ...values };
-    activeAccount = { ...activeAccount, ...values };
-    if (writeStorage(profileKey(activeAccount.accountNumber), { profile: staffProfile, updatedAt: Date.now() })) {
-      setStaffProfileStatus("Auto-saved: Just now");
-    } else {
-      setStaffProfileStatus("Changes kept for this visit. Browser storage is unavailable.", true);
-    }
-    syncIdentity();
-    return true;
+    profileSaving = true; document.querySelector("#staff-profile-save").disabled = true;
+    try {
+      const saved = accountService.saveProfile(values, profileRevision); staffProfile = saved.profile; profileRevision = saved.revision;
+      syncIdentity(); syncStaffProfileForm(); setText("#staff-profile-last-saved", `Last browser profile save: ${formatDateTime(saved.updatedAt)}. This is not a secure audit history.`); setStaffProfileStatus("Profile changes saved in this browser.");
+      return true;
+    } catch (error) { setStaffProfileStatus(error.message, true); return false; }
+    finally { profileSaving = false; document.querySelector("#staff-profile-save").disabled = false; }
   }
 
   function setStaffProfileEditing(editing) {
     profileEditing = editing;
     staffProfileInputs.forEach((input) => { input.readOnly = !editing; });
     staffProfileEditButton.setAttribute("aria-pressed", String(editing));
-    const label = editing ? "Finish editing profile information" : "Edit profile information";
+    staffProfileEditButton.hidden = editing;
+    document.querySelector("#staff-profile-edit-actions").hidden = !editing;
+    const label = "Edit staff profile information";
     staffProfileEditButton.setAttribute("aria-label", label);
     staffProfileEditButton.title = label;
-    staffProfileEditLabel.textContent = editing ? "Done" : "Edit";
-    staffProfileEditIcon.setAttribute("href", editing ? "#icon-check" : "#icon-pencil");
+    staffProfileEditLabel.textContent = "Edit Profile";
+    staffProfileEditIcon.setAttribute("href", "#icon-pencil");
   }
 
   function finishStaffProfileEditing() {
@@ -451,7 +361,6 @@ window.initializeStaffDashboard = () => {
     renderRequestStats();
     renderRecentRequests();
     renderServiceVolume();
-    if (selectedRecordNumber) renderRecordDetail(selectedRecordNumber);
   }
 
   function requestDetailsFromAnywhere(id) {
@@ -464,175 +373,6 @@ window.initializeStaffDashboard = () => {
     navigate("staff-requests");
   }
 
-  function roster() {
-    const students = sampleStudents.map((student) => ({ ...student }));
-    let registered = [];
-    try {
-      registered = accounts.listStudents();
-    } catch {
-      registered = [];
-    }
-    registered.forEach((account) => {
-      if (students.some((student) => student.accountNumber === account.accountNumber)) return;
-      students.push({
-        accountNumber: account.accountNumber,
-        fullName: account.fullName,
-        email: account.email,
-        phoneNumber: account.phoneNumber || "Not provided",
-        yearLevel: account.yearLevel || "Not provided",
-        program: account.program || "Not provided",
-        semester: account.semester || "Not provided",
-        status: "Enrolled",
-        source: "Registered portal account",
-      });
-    });
-    return students;
-  }
-
-  function populateProgramFilter() {
-    const select = document.querySelector("#staff-record-program");
-    const programs = [...new Set(roster().map((student) => student.program).filter(Boolean))].sort();
-    select.replaceChildren();
-    const all = document.createElement("option");
-    all.value = "all";
-    all.textContent = "All programs";
-    select.append(all);
-    programs.forEach((program) => {
-      const option = document.createElement("option");
-      option.value = program;
-      option.textContent = program;
-      select.append(option);
-    });
-    select.value = programs.includes(recordProgram) ? recordProgram : "all";
-    recordProgram = select.value;
-  }
-
-  function filteredStudents() {
-    const query = recordQuery.trim().toLowerCase();
-    return roster().filter((student) => {
-      const matchesProgram = recordProgram === "all" || student.program === recordProgram;
-      const text = [student.fullName, student.accountNumber, student.email, student.program].join(" ").toLowerCase();
-      return matchesProgram && (!query || text.includes(query));
-    });
-  }
-
-  function studentStatusClass(status) {
-    return status.toLowerCase().replace(/\s+/g, "-");
-  }
-
-  function renderRecords() {
-    const students = filteredStudents();
-    recordRows.replaceChildren();
-    students.forEach((student) => {
-      const row = document.createElement("tr");
-      const studentCell = document.createElement("td");
-      studentCell.className = "staff-student-cell";
-      const name = document.createElement("strong");
-      name.textContent = student.fullName;
-      const email = document.createElement("small");
-      email.textContent = student.email;
-      studentCell.append(name, email);
-      const status = document.createElement("td");
-      const badge = document.createElement("span");
-      badge.className = `staff-status staff-status-${studentStatusClass(student.status)}`;
-      badge.textContent = student.status;
-      status.append(badge);
-      const action = document.createElement("td");
-      action.className = "staff-table-action-cell";
-      action.append(createViewButton("View record", () => openStudentRecord(student.accountNumber), `View record for ${student.fullName}`));
-      row.append(studentCell, createCell(student.accountNumber), createCell(student.program), createCell(student.yearLevel), status, action);
-      recordRows.append(row);
-    });
-    setText("#staff-record-count", students.length);
-    document.querySelector("#staff-record-empty").hidden = students.length > 0;
-  }
-
-  function renderRecordDetail(accountNumber) {
-    const student = roster().find((entry) => entry.accountNumber === accountNumber);
-    const detail = document.querySelector("#staff-record-detail");
-    if (!student) {
-      detail.hidden = true;
-      selectedRecordNumber = "";
-      return;
-    }
-    selectedRecordNumber = accountNumber;
-    setText("#staff-record-detail-number", `Student No. ${student.accountNumber}`);
-    setText("#staff-record-detail-name", student.fullName);
-    setText("#staff-record-detail-program", `${student.program} · ${student.yearLevel}`);
-    setText("#staff-record-email", student.email);
-    setText("#staff-record-phone", student.phoneNumber || "Not provided");
-    setText("#staff-record-status", student.status);
-    setText("#staff-record-year", student.yearLevel);
-    setText("#staff-record-semester", student.semester);
-    setText("#staff-record-source", student.source);
-    const related = requestService.listForStudent(accountNumber);
-    recordRequests.replaceChildren();
-    related.forEach((request) => {
-      const item = document.createElement("article");
-      item.className = "staff-record-request";
-      const copy = document.createElement("div");
-      const reference = document.createElement("strong");
-      reference.textContent = request.id;
-      const description = document.createElement("span");
-      description.textContent = `${request.documentType} · ${formatDateTime(request.submittedAt)}`;
-      copy.append(reference, description);
-      const actions = document.createElement("div");
-      actions.className = "staff-record-request-actions";
-      actions.append(createStatusBadge(request.status));
-      actions.append(createViewButton("Open", () => requestDetailsFromAnywhere(request.id), `Open request ${request.id}`));
-      item.append(copy, actions);
-      recordRequests.append(item);
-    });
-    document.querySelector("#staff-record-requests-empty").hidden = related.length > 0;
-    detail.hidden = false;
-  }
-
-  function openStudentRecord(accountNumber) {
-    renderRecordDetail(accountNumber);
-    const heading = document.querySelector("#staff-record-detail-name");
-    heading.setAttribute("tabindex", "-1");
-    heading.focus({ preventScroll: true });
-    document.querySelector("#staff-record-detail").scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-
-  function renderAnnouncements() {
-    const list = document.querySelector("#staff-announcement-list");
-    const sorted = [...announcements].sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt));
-    list.replaceChildren();
-    sorted.forEach((announcement) => {
-      const article = document.createElement("article");
-      article.className = "staff-announcement-card";
-      const header = document.createElement("header");
-      const audience = document.createElement("span");
-      audience.className = "staff-audience-tag";
-      audience.textContent = announcement.audience || "All";
-      const title = document.createElement("h4");
-      title.textContent = announcement.title;
-      header.append(audience, title);
-      const message = document.createElement("p");
-      message.textContent = announcement.message;
-      const footer = document.createElement("footer");
-      const meta = document.createElement("span");
-      meta.textContent = `${announcement.author || "Staff"} · ${formatDateTime(announcement.createdAt)}`;
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "staff-text-button";
-      remove.textContent = "Delete";
-      remove.setAttribute("aria-label", `Delete announcement ${announcement.title}`);
-      remove.addEventListener("click", () => {
-        announcements = announcements.filter((entry) => entry.id !== announcement.id);
-        saveAnnouncements();
-        renderAnnouncements();
-        notify("Announcement deleted.");
-      });
-      footer.append(meta, remove);
-      article.append(header, message, footer);
-      list.append(article);
-    });
-    setText("#staff-announcement-count", announcements.length);
-    document.querySelector("#staff-announcement-empty").hidden = announcements.length > 0;
-  }
-
   function setStaffSettingsStatus(message, error = false) {
     staffSaveMessage.textContent = message;
     staffSaveStatus.classList.toggle("is-error", error);
@@ -642,6 +382,19 @@ window.initializeStaffDashboard = () => {
     syncIdentity();
     syncNotificationPreferences();
     staffSessionInput.checked = Boolean(preferences.rememberSession);
+    const session = accounts.sessionInfo();
+    setText("#staff-session-signed-in", session?.signedInAt ? formatDateTime(session.signedInAt) : "Not recorded (legacy marker)");
+    setText("#staff-session-expires", session?.expiresAt ? formatDateTime(session.expiresAt) : "Not recorded (legacy marker)");
+    setText("#staff-session-persistence", session?.persistent ? "Yes, in this tab until recorded expiration" : "No — current visit only");
+    setText("#staff-session-explanation", session?.legacy ? "This legacy demo marker has no sign-in/expiration timestamps. Sign out and sign in to create a timed demo session. No historical sign-in time is inferred." : "New demo sessions have an eight-hour absolute lifetime. Client checks are demonstration behavior, not server-enforced expiration. No IP/location or last-activity data is collected.");
+    setText("#staff-password-changed-at", activeAccount?.passwordChangedAt ? formatDateTime(activeAccount.passwordChangedAt) : "Not recorded");
+    const container = document.querySelector("#staff-account-capabilities"); container.replaceChildren();
+    [["Announcements", () => window.PortalAnnouncementService.capabilities()], ["Reports", () => window.PortalReportService.capabilities()], ["Help & Support", () => window.PortalSupportService.capabilities()]].forEach(([label, read]) => {
+      const section = document.createElement("section"); const heading = document.createElement("h5"); heading.textContent = label; section.append(heading);
+      try { const list = document.createElement("ul"); const capabilities = read(); if (!capabilities.length) { const item = document.createElement("li"); item.textContent = "No capabilities configured"; list.append(item); } capabilities.forEach((value) => { const item = document.createElement("li"); item.textContent = value.replace(/([a-z])([A-Z])/g, "$1 $2"); list.append(item); }); section.append(list); }
+      catch { const info = document.createElement("p"); info.textContent = "Capability source unavailable"; section.append(info); }
+      container.append(section);
+    });
   }
 
   function selectStaffSettingsTab(name, focus = false) {
@@ -699,6 +452,9 @@ window.initializeStaffDashboard = () => {
   }
 
   function showPage(page, focus = true) {
+    if (!activeAccount || !accounts.isSessionValid(activeAccount)) return false;
+    if (!accountService.canAccess(page)) { page = "staff-dashboard"; window.history.replaceState(null, "", routes[page].hash); notify("Your account is not authorized to view that staff module."); }
+    if (!document.dispatchEvent(new CustomEvent("portal:staffbeforenavigate", { cancelable: true, detail: { page } }))) return false;
     const view = staffMain.querySelector(`[data-view="${page}"]`);
     if (!view) return;
     staffScreen.dataset.currentPage = page;
@@ -715,29 +471,33 @@ window.initializeStaffDashboard = () => {
     topbarTitle.textContent = pageTitles[page] || "Staff Workspace";
     document.title = `RTU Pasig Staff | ${view.querySelector("h2").textContent.trim()}`;
     if (page === "staff-dashboard") renderDashboard();
-    if (page === "staff-records") renderRecords();
-    if (page === "staff-announcements") renderAnnouncements();
     if (page === "staff-settings") syncStaffSettings();
+    if (page !== "staff-settings") resetStaffPasswordForm();
     if (focus) view.querySelector("h2").focus();
     window.scrollTo(0, 0);
     document.dispatchEvent(new CustomEvent("portal:staffpagechange", { detail: page }));
+    return true;
   }
 
   function pageFromRoute() {
+    if (/^#\/staff\/(?:student-records|records)(?:\/[^/]+)?$/.test(window.location.hash)) return "staff-records";
     return Object.keys(routes).find((page) => routes[page].hash === window.location.hash) || "staff-dashboard";
   }
 
   function renderRoute() {
     if (staffScreen.hidden) return;
     const page = pageFromRoute();
-    if (window.location.hash !== routes[page].hash) window.history.replaceState(null, "", routes[page].hash);
-    showPage(page);
+    if (page === "staff-records" && window.location.hash.startsWith("#/staff/records")) window.history.replaceState(null, "", window.location.hash.replace("#/staff/records", "#/staff/student-records"));
+    else if (page !== "staff-records" && window.location.hash !== routes[page].hash) window.history.replaceState(null, "", routes[page].hash);
+    if (showPage(page)) acceptedStaffHash = window.location.hash;
+    else window.history.replaceState(null, "", acceptedStaffHash || routes[staffScreen.dataset.currentPage].hash);
   }
 
   function navigate(page, replace = false) {
     if (staffScreen.hidden || !Object.hasOwn(routes, page)) return;
     if (replace) {
-      window.history.replaceState(null, "", routes[page].hash);
+      const keepStudentDetail = page === "staff-records" && /^#\/staff\/(?:student-records|records)\//.test(window.location.hash);
+      if (!keepStudentDetail) window.history.replaceState(null, "", routes[page].hash);
       renderRoute();
     } else if (window.location.hash === routes[page].hash) {
       renderRoute();
@@ -747,8 +507,9 @@ window.initializeStaffDashboard = () => {
   }
 
   window.PortalStaffContext = Object.freeze({
+    openRequest(id) { if (activeAccount) requestDetailsFromAnywhere(id); },
     current() {
-      return activeAccount ? { account: { ...activeAccount }, profile: { ...staffProfile } } : null;
+      return activeAccount && accounts.isSessionValid(activeAccount) ? { account: { ...activeAccount }, profile: { ...staffProfile } } : null;
     },
     consumeRequestIntent() {
       const id = pendingRequestOpenId;
@@ -762,6 +523,10 @@ window.initializeStaffDashboard = () => {
 
   document.addEventListener("portal:requestschanged", () => {
     if (activeAccount) renderRequestViews();
+  });
+  document.addEventListener("portal:supportchanged", () => {
+    if (!activeAccount) return;
+    try { const support = window.PortalSupportService.summary(); setText("#staff-support-open-count", support.open + support.progress + support.waiting); } catch { setText("#staff-support-open-count", "N/A"); }
   });
 
   document.addEventListener("portal:appointmentschanged", () => {
@@ -782,7 +547,7 @@ window.initializeStaffDashboard = () => {
       const reference = document.createElement("strong");
       reference.textContent = appointment.id;
       const description = document.createElement("span");
-      description.textContent = appointment.studentName + " � " + appointment.serviceType + " � " + appointment.date + " " + appointment.start;
+      description.textContent = appointment.studentName + " · " + appointment.serviceType + " · " + appointment.date + " " + appointment.start;
       copy.append(reference, description);
       const actions = document.createElement("div");
       actions.className = "staff-record-request-actions";
@@ -814,15 +579,14 @@ window.initializeStaffDashboard = () => {
     staffScreen.hidden = false;
     selectStaffSettingsTab("account");
     renderDashboard();
-    renderRecords();
-    renderAnnouncements();
+    try { const support = window.PortalSupportService.summary(); setText("#staff-support-open-count", support.open + support.progress + support.waiting); } catch { setText("#staff-support-open-count", "N/A"); }
     navigate(pageFromRoute(), true);
     document.dispatchEvent(new CustomEvent("portal:staffaccountchange", { detail: { account: { ...account }, profile: { ...staffProfile } } }));
   }
 
-  function logOutStaff() {
-    document.dispatchEvent(new Event("portal:beforelogout"));
-    if (profileSaveTimer !== undefined) saveStaffProfile();
+  function logOutStaff(forced = false, message = "") {
+    if (!forced && !document.dispatchEvent(new CustomEvent("portal:staffbeforelogout", { cancelable: true }))) return;
+    if (!forced) document.dispatchEvent(new Event("portal:beforelogout"));
     accounts.clearSession();
     activeAccount = null;
     staffProfile = null;
@@ -835,9 +599,10 @@ window.initializeStaffDashboard = () => {
     preferences = { ...defaultPreferences };
     applyTheme();
     resetStaffPasswordForm();
+    staffProfileForm.reset(); document.querySelector("#staff-account-capabilities").replaceChildren();
+    document.querySelectorAll("[data-staff-name]").forEach((element) => { element.textContent = "Staff member"; });
+    document.querySelectorAll("[data-staff-value]").forEach((element) => { element.textContent = "Not provided"; });
     pendingRequestOpenId = "";
-    selectedRecordNumber = "";
-    document.querySelector("#staff-record-detail").hidden = true;
     window.history.replaceState(null, "", window.location.pathname + window.location.search);
     document.title = "RTU Pasig | Academic Services Portal";
     document.querySelector("#login-form").reset();
@@ -845,14 +610,13 @@ window.initializeStaffDashboard = () => {
     document.querySelector("#account-number").focus();
     window.scrollTo(0, 0);
     document.dispatchEvent(new Event("portal:logout"));
+    document.dispatchEvent(new CustomEvent("portal:loginrequired", { detail: { role: "staff", message } }));
     window.PortalMotion.enter(loginScreen.querySelector(".login-content"));
   }
 
   themeToggle.addEventListener("click", () => {
     if (!activeAccount) return;
-    preferences.darkMode = !preferences.darkMode;
-    savePreferences();
-    applyTheme();
+    savePreferences({ darkMode: !preferences.darkMode });
   });
 
   notificationButton.addEventListener("click", () => navigate("staff-requests"));
@@ -874,9 +638,8 @@ window.initializeStaffDashboard = () => {
     button.addEventListener("click", (event) => {
       if (button.matches("a") && (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0)) return;
       event.preventDefault();
-      if (sidebar.contains(button)) {
-        if (mobileNavigation.matches) mobileSidebarOpen = false;
-        else desktopSidebarOpen = false;
+      if (sidebar.contains(button) && mobileNavigation.matches) {
+        mobileSidebarOpen = false;
         syncNavigation();
         document.dispatchEvent(new Event("portal:layoutchange"));
       }
@@ -889,6 +652,16 @@ window.initializeStaffDashboard = () => {
     closeNavigation();
     window.PortalMotion.swap([accountOptions], open ? accountOptions : null);
     accountToggle.setAttribute("aria-expanded", String(open));
+  });
+  accountToggle.addEventListener("keydown", (event) => {
+    if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
+    event.preventDefault(); closeNavigation(); window.PortalMotion.swap([accountOptions], accountOptions); accountToggle.setAttribute("aria-expanded", "true");
+    const options = [...accountOptions.querySelectorAll("a, button")]; (event.key === "ArrowUp" ? options.at(-1) : options[0])?.focus();
+  });
+  accountOptions.addEventListener("keydown", (event) => {
+    const options = [...accountOptions.querySelectorAll("a, button")]; const index = options.indexOf(document.activeElement);
+    const next = event.key === "ArrowDown" ? (index + 1) % options.length : event.key === "ArrowUp" ? (index - 1 + options.length) % options.length : event.key === "Home" ? 0 : event.key === "End" ? options.length - 1 : -1;
+    if (next >= 0) { event.preventDefault(); options[next].focus(); }
   });
   document.addEventListener("click", (event) => {
     if (!accountDropdown.contains(event.target)) closeAccountDropdown();
@@ -915,65 +688,17 @@ window.initializeStaffDashboard = () => {
   });
   window.addEventListener("hashchange", renderRoute);
 
-  document.querySelector("#staff-logout-button").addEventListener("click", logOutStaff);
-  document.querySelector("#staff-settings-logout-button").addEventListener("click", logOutStaff);
+  document.querySelector("#staff-logout-button").addEventListener("click", () => logOutStaff());
+  document.querySelector("#staff-settings-logout-button").addEventListener("click", () => logOutStaff());
+  document.addEventListener("portal:sessioninvalidated", (event) => { if (activeAccount && event.detail.role === "staff" && !accounts.isSessionValid(activeAccount, false)) logOutStaff(true, event.detail.message); });
 
   document.querySelectorAll("[data-staff-close-dialog]").forEach((button) => {
     button.addEventListener("click", () => button.closest("dialog").close());
   });
 
-  document.querySelector("#staff-record-search").addEventListener("input", (event) => {
-    recordQuery = event.target.value;
-    renderRecords();
-  });
-  document.querySelector("#staff-record-program").addEventListener("change", (event) => {
-    recordProgram = event.target.value;
-    renderRecords();
-  });
-  document.querySelector("#staff-record-close").addEventListener("click", () => {
-    document.querySelector("#staff-record-detail").hidden = true;
-    selectedRecordNumber = "";
-  });
-
-  announcementForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-    if (!announcementForm.checkValidity()) {
-      announcementForm.reportValidity();
-      return;
-    }
-    const title = announcementForm.elements.title.value.trim();
-    const message = announcementForm.elements.message.value.trim();
-    if (!title || !message) {
-      announcementStatus.textContent = "Enter a title and message before publishing.";
-      announcementStatus.classList.add("is-error");
-      return;
-    }
-    announcements.unshift({
-      id: `ann-${Date.now()}`,
-      title,
-      message,
-      audience: announcementForm.elements.audience.value,
-      createdAt: new Date().toISOString(),
-      author: staffProfile?.fullName || "Staff",
-    });
-    saveAnnouncements();
-    renderAnnouncements();
-    announcementForm.reset();
-    announcementStatus.classList.remove("is-error");
-    announcementStatus.textContent = "Announcement published.";
-    notify("Announcement published to the staff workspace.");
-    announcementForm.elements.title.focus();
-  });
-  announcementForm.elements.title.addEventListener("input", () => {
-    announcementStatus.textContent = "";
-    announcementStatus.classList.remove("is-error");
-  });
-
   staffProfileEditButton.addEventListener("click", () => {
     if (!activeAccount) return;
-    if (profileEditing) {
-      finishStaffProfileEditing();
-    } else {
+    if (!profileEditing) {
       setStaffProfileEditing(true);
       staffProfileInputs[0].focus();
     }
@@ -983,21 +708,28 @@ window.initializeStaffDashboard = () => {
       if (!profileEditing) return;
       input.setCustomValidity("");
       input.removeAttribute("aria-invalid");
-      window.clearTimeout(profileSaveTimer);
-      setStaffProfileStatus("Saving changes…");
-      profileSaveTimer = window.setTimeout(saveStaffProfile, 500);
-    });
-    input.addEventListener("change", () => {
-      if (profileEditing) saveStaffProfile();
+      setStaffProfileStatus("Unsaved changes. Choose Save Changes or Cancel.");
     });
   });
   staffProfileForm.addEventListener("submit", (event) => {
     event.preventDefault();
     if (profileEditing) finishStaffProfileEditing();
   });
-  window.addEventListener("pagehide", () => {
-    if (profileSaveTimer !== undefined) saveStaffProfile();
+  document.querySelector("#staff-profile-cancel").addEventListener("click", () => { if (activeAccount) loadStaffProfile(activeAccount); staffProfileEditButton.focus(); });
+  function profileDirty() { return profileEditing && staffProfileInputs.some((input) => input.value.trim() !== String(staffProfile?.[input.name] || "")); }
+  ["portal:staffbeforenavigate", "portal:staffbeforelogout"].forEach((name) => document.addEventListener(name, (event) => {
+    if (profileDirty() && !window.confirm("Discard unsaved staff profile changes?")) { event.preventDefault(); return; }
+    if (profileEditing && activeAccount) loadStaffProfile(activeAccount);
+  }));
+  window.addEventListener("beforeunload", (event) => { if (profileDirty()) { event.preventDefault(); event.returnValue = ""; } });
+  document.addEventListener("portal:staffprofileupdated", () => {
+    if (!activeAccount || profileSaving) return;
+    if (profileEditing) setStaffProfileStatus("The saved profile changed in another view. Unsaved fields are kept; Cancel to reload the latest values.", true);
+    else loadStaffProfile(activeAccount);
   });
+  document.addEventListener("portal:staffpreferencesupdated", () => { if (activeAccount) { loadPreferences(activeAccount); syncStaffSettings(); } });
+  document.querySelector("#staff-theme-preference").addEventListener("change", (event) => savePreferences({ darkMode: event.target.value === "dark" }));
+  document.querySelector("#staff-notification-shortcut").addEventListener("click", () => selectStaffSettingsTab("notifications", true));
 
   staffSettingsTabs.forEach((tab, index) => {
     tab.addEventListener("click", () => selectStaffSettingsTab(tab.dataset.staffSettingsTab));
@@ -1032,7 +764,7 @@ window.initializeStaffDashboard = () => {
       if (!input.value.trim()) input.setCustomValidity("Enter your password.");
     });
     const { currentPassword, newPassword, confirmPassword } = staffPasswordForm.elements;
-    if (newPassword.value.length < 8) newPassword.setCustomValidity("Use at least 8 characters for your new password.");
+    if (newPassword.value.length < accounts.PASSWORD_POLICY.minimumLength || newPassword.value.length > accounts.PASSWORD_POLICY.maximumLength) newPassword.setCustomValidity("Use 8–128 characters for your new password.");
     if (newPassword.value !== confirmPassword.value) confirmPassword.setCustomValidity("The new passwords do not match.");
     const invalid = staffPasswordInputs.find((input) => !input.checkValidity());
     if (invalid) {
@@ -1071,36 +803,27 @@ window.initializeStaffDashboard = () => {
   staffNotificationForm.addEventListener("submit", (event) => event.preventDefault());
   staffNotificationForm.addEventListener("change", () => {
     if (!activeAccount) return;
-    staffNotificationInputs.forEach((input) => { preferences[input.name] = input.checked; });
-    savePreferences();
-    syncNotificationUi();
-    setStaffSettingsStatus("Auto-saved: Just now");
+    savePreferences(Object.fromEntries(staffNotificationInputs.map((input) => [input.name, input.checked])));
   });
 
   staffSessionForm.addEventListener("submit", (event) => event.preventDefault());
   staffSessionInput.addEventListener("change", () => {
     if (!activeAccount) return;
-    preferences.rememberSession = staffSessionInput.checked;
-    savePreferences();
-    if (preferences.rememberSession) accounts.saveSession(activeAccount);
-    else accounts.clearSession();
-    setStaffSettingsStatus(staffSessionInput.checked ? "This tab will keep your staff session on refresh." : "This tab will require sign-in after refresh.");
+    if (savePreferences({ rememberSession: staffSessionInput.checked })) { syncStaffSettings(); setStaffSettingsStatus(accounts.sessionInfo()?.persistent ? "The current session is persisted in this tab until its recorded expiration." : "The current session is visit-only; refresh requires sign-in."); }
   });
 
   document.addEventListener("portal:login", (event) => {
     if (event.detail?.role !== "staff") return;
-    accounts.saveSession(event.detail);
-    openStaffDashboard(event.detail);
+    const identity = accounts.saveSession(event.detail, { newLogin: true });
+    openStaffDashboard(identity);
   });
 
-  announcements = loadAnnouncements();
-  populateProgramFilter();
   renderRequestViews();
-  renderAnnouncements();
   syncNotificationUi();
   syncNavigation();
   applyTheme();
 
   const savedAccount = accounts.restoreSession();
   if (savedAccount?.role === "staff") openStaffDashboard(savedAccount);
+  window.setInterval(() => { if (activeAccount) accounts.isSessionValid(activeAccount); }, 15000);
 };

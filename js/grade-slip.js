@@ -489,7 +489,6 @@ window.initializeGradeSlip = () => {
       resizeProgram();
       submitting = false;
       submitButton.disabled = false;
-      if (account && !hasDraft) saveDraft();
       showSavedTime();
     } else if (saveTimer !== undefined) saveDraft();
   });

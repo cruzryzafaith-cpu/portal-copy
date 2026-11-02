@@ -12,7 +12,6 @@
     "id-printing": { hash: "#/services/id-printing", file: "pages/id-printing.html" },
     "id-printing-complete": { hash: "#/services/id-printing/complete", file: "pages/id-printing-complete.html" },
     requests: { hash: "#/my-request", file: "pages/my-request.html" },
-    records: { hash: "#/academic-records", file: "pages/academic-records.html" },
     announcements: { hash: "#/announcements", file: "pages/announcements.html" },
     help: { hash: "#/help", file: "pages/help.html" },
     profile: { hash: "#/profile", file: "pages/profile.html" },
@@ -22,8 +21,11 @@
     "staff-dashboard": { hash: "#/staff/dashboard", file: "pages/staff-dashboard.html" },
     "staff-requests": { hash: "#/staff/requests", file: "pages/staff-requests.html" },
     "staff-appointments": { hash: "#/staff/appointments", file: "pages/staff-appointments.html" },
-    "staff-records": { hash: "#/staff/records", file: "pages/staff-records.html" },
+    "staff-document-processing": { hash: "#/staff/document-processing", file: "pages/staff-document-processing.html" },
+    "staff-records": { hash: "#/staff/student-records", file: "pages/staff-records.html" },
     "staff-announcements": { hash: "#/staff/announcements", file: "pages/staff-announcements.html" },
+    "staff-reports": { hash: "#/staff/reports", file: "pages/staff-reports.html" },
+    "staff-help-support": { hash: "#/staff/help-support", file: "pages/staff-help-support.html" },
     "staff-profile": { hash: "#/staff/profile", file: "pages/staff-profile.html" },
     "staff-settings": { hash: "#/staff/settings", file: "pages/staff-settings.html" },
   });
@@ -79,12 +81,13 @@
     try {
       // Mount all views once before binding handlers. This preserves in-session
       // form state and request drafts while navigating between hash routes.
-      const [login, icons, shell, staffShell, dialogs, views, staffViews] = await Promise.all([
+      const [login, icons, shell, staffShell, dialogs, supportDialogs, views, staffViews] = await Promise.all([
         loadMarkup("pages/login.html"),
         loadMarkup("components/icons.html"),
         loadMarkup("components/dashboard-shell.html"),
         loadMarkup("components/staff-shell.html"),
         loadMarkup("components/dialogs.html"),
+        loadMarkup("components/support-dialogs.html"),
         loadViews(studentRoutes),
         loadViews(staffRoutes),
       ]);
@@ -103,7 +106,7 @@
       });
       views.forEach((view) => main.append(view));
       staffViews.forEach((view) => staffMain.append(view));
-      root.replaceChildren(login, icons, shell, staffShell, dialogs);
+      root.replaceChildren(login, icons, shell, staffShell, dialogs, supportDialogs);
       window.PortalMotion.initialize();
       window.initializePortalLogin();
       window.initializePortalDashboard();
@@ -111,6 +114,15 @@
       window.initializeStaffDashboard();
       window.initializeStaffRequests();
       window.initializeStaffAppointments();
+      window.initializeStaffDocumentProcessing();
+      window.initializeStaffStudentRecords();
+      window.initializeStaffAnnouncements();
+      window.initializeSupportUI();
+      window.initializeStaffHelpSupport();
+      window.initializeStudentHelp();
+      window.initializeStudentAnnouncements();
+      window.initializePortalNotifications();
+      window.initializeStaffReports();
       window.initializeGradeSlip();
       window.initializeIdPrinting();
       window.initializeRegistrationForm();

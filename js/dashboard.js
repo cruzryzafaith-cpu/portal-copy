@@ -42,6 +42,7 @@ window.initializePortalDashboard = () => {
   let requestFeedbackTimer;
   let profileSaveTimer;
   let profileUpdatedAt = null;
+  let profileSavedThisVisit = false;
   let activeAccount = null;
   let profileStorageKey = "";
   let profileEditing = false;
@@ -55,9 +56,10 @@ window.initializePortalDashboard = () => {
   }
 
   function profileSnapshot() {
+    const signedIn = activeAccount && accounts.isSessionValid(activeAccount);
     return {
-      account: activeAccount ? { ...activeAccount } : null,
-      values: { ...Object.fromEntries(profileInputs.map((input) => [input.name, input.value])), studentNumber: profileForm.elements.studentNumber.value },
+      account: signedIn ? { ...activeAccount } : null,
+      values: signedIn ? { ...Object.fromEntries(profileInputs.map((input) => [input.name, input.value])), studentNumber: profileForm.elements.studentNumber.value } : {},
       message: profileMessage.textContent,
       error: profileStatus.classList.contains("is-error"),
     };
@@ -101,7 +103,7 @@ window.initializePortalDashboard = () => {
     setProfileStatus(`Auto-saved: ${recent ? "Just now" : savedTime}`);
   }
 
-  function saveProfile() {
+  function saveProfile(silent = false) {
     window.clearTimeout(profileSaveTimer);
     profileSaveTimer = undefined;
     if (!activeAccount) return false;
@@ -117,6 +119,8 @@ window.initializePortalDashboard = () => {
     try {
       window.localStorage.setItem(profileStorageKey, JSON.stringify({ profile, updatedAt }));
       profileUpdatedAt = updatedAt;
+      if (silent) return true;
+      profileSavedThisVisit = true;
       showProfileSavedTime();
     } catch {
       profileUpdatedAt = null;
@@ -147,7 +151,6 @@ window.initializePortalDashboard = () => {
       }
       profileUpdatedAt = saved.updatedAt;
       syncProfileDetails();
-      showProfileSavedTime();
     } catch {
       // Keep this account's registration details when saved profile data is unavailable.
     }
@@ -187,6 +190,7 @@ window.initializePortalDashboard = () => {
     window.clearTimeout(profileSaveTimer);
     profileSaveTimer = undefined;
     profileUpdatedAt = null;
+    profileSavedThisVisit = false;
     activeAccount = account;
     profileStorageKey = `rtu.portal.profile.${encodeURIComponent(account.accountNumber)}`;
     profileForm.reset();
@@ -303,7 +307,7 @@ window.initializePortalDashboard = () => {
     if (!view) return;
     dashboardScreen.dataset.currentPage = page;
     if (page === "requests") selectedRequestId = "";
-    if (["profile", "settings"].includes(page) && profileSaveTimer === undefined && !profileStatus.classList.contains("is-error")) showProfileSavedTime();
+    if (profileSavedThisVisit && ["profile", "settings"].includes(page) && profileSaveTimer === undefined && !profileStatus.classList.contains("is-error")) showProfileSavedTime();
     window.PortalMotion.swap(document.querySelectorAll("[data-view]"), view);
     document.querySelectorAll(".dashboard-nav [data-page], .account-options [data-page]").forEach((button) => {
       const active = button.dataset.page === page;
@@ -329,6 +333,7 @@ window.initializePortalDashboard = () => {
 
   function renderRoute() {
     if (dashboardScreen.hidden) return;
+    if (activeAccount && !accounts.isSessionValid(activeAccount)) return;
     const page = pageFromRoute();
     if (window.location.hash !== routes[page]) window.history.replaceState(null, "", routes[page]);
     showPage(page);
@@ -352,7 +357,7 @@ window.initializePortalDashboard = () => {
     loadProfile(account);
     loginScreen.hidden = true;
     dashboardScreen.hidden = false;
-    if (!profileUpdatedAt) saveProfile();
+    if (!profileUpdatedAt) saveProfile(true);
     selectedRequestId = "";
     renderRequests();
     navigate(pageFromRoute(), true);
@@ -361,16 +366,15 @@ window.initializePortalDashboard = () => {
 
   document.addEventListener("portal:login", (event) => {
     if (event.detail?.role !== "student") return;
-    accounts.saveSession(event.detail);
-    openDashboard(event.detail);
+    const identity = accounts.saveSession(event.detail, { newLogin: true });
+    openDashboard(identity);
   });
 
   document.querySelectorAll("[data-page]").forEach((button) => {
     button.addEventListener("click", (event) => {
       if (button.matches("a") && (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0)) return;
       event.preventDefault();
-      if (sidebar.contains(button)) {
-        desktopSidebarOpen = false;
+      if (sidebar.contains(button) && mobileNavigation.matches) {
         closeNavigation();
         document.dispatchEvent(new Event("portal:layoutchange"));
       }
@@ -397,9 +401,10 @@ window.initializePortalDashboard = () => {
     }
   });
 
-  document.querySelector("#logout-button").addEventListener("click", () => {
-    document.dispatchEvent(new Event("portal:beforelogout"));
-    if (profileSaveTimer !== undefined) saveProfile();
+  function logOutStudent(forced = false, message = "") {
+    if (!forced) document.dispatchEvent(new Event("portal:beforelogout"));
+    if (!forced && profileSaveTimer !== undefined) saveProfile();
+    window.clearTimeout(profileSaveTimer); profileSaveTimer = undefined;
     accounts.clearSession();
     activeAccount = null;
     setProfileEditing(false);
@@ -422,8 +427,11 @@ window.initializePortalDashboard = () => {
     document.querySelector("#account-number").focus();
     window.scrollTo(0, 0);
     document.dispatchEvent(new Event("portal:logout"));
+    document.dispatchEvent(new CustomEvent("portal:loginrequired", { detail: { role: "student", message } }));
     window.PortalMotion.enter(loginScreen.querySelector(".login-content"));
-  });
+  }
+  document.querySelector("#logout-button").addEventListener("click", () => logOutStudent());
+  document.addEventListener("portal:sessioninvalidated", (event) => { if (activeAccount && event.detail.role === "student" && !accounts.isSessionValid(activeAccount, false)) logOutStudent(true, event.detail.message); });
 
   document.querySelectorAll("[data-request]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -722,8 +730,25 @@ window.initializePortalDashboard = () => {
     appendMeta(grid, "Appointment status", relatedAppointment ? relatedAppointment.status : "Not scheduled");
     appendMeta(grid, "Assigned staff", request.assignedStaff || "Not yet assigned");
     appendMeta(grid, "Last updated", formatRequestDateTime(request.updatedAt));
+    if (request.processingStartedAt) appendMeta(grid, "Processing started", formatRequestDateTime(request.processingStartedAt));
+    if (request.readyAt) appendMeta(grid, "Ready for pickup", formatRequestDateTime(request.readyAt));
+    if (request.releasedAt) appendMeta(grid, "Release recorded", formatRequestDateTime(request.releasedAt));
+    if (request.release?.reference) appendMeta(grid, "Release reference", request.release.reference);
     requestDetailEntries(request).forEach(([label, value]) => appendMeta(grid, label, value));
     infoSection.append(infoTitle, grid);
+    if (request.notifications?.length) {
+      const notices = document.createElement("section");
+      notices.className = "request-detail-section";
+      const heading = document.createElement("h5");
+      heading.textContent = "Request notifications · in-app only";
+      notices.append(heading);
+      request.notifications.slice().reverse().forEach((notification) => {
+        const message = document.createElement("p");
+        message.textContent = `${formatRequestDateTime(notification.timestamp)} — ${notification.message}`;
+        notices.append(message);
+      });
+      infoSection.append(notices);
+    }
 
     const historySection = document.createElement("section");
     historySection.className = "request-detail-section";
@@ -833,11 +858,11 @@ window.initializePortalDashboard = () => {
     const labels = {
       [requestService.STATUS.PENDING]: "Pending Review",
       [requestService.STATUS.CORRECTION]: "Needs Correction",
-      [requestService.STATUS.APPROVED]: "Under Verification",
+      [requestService.STATUS.APPROVED]: "Approved",
       [requestService.STATUS.REJECTED]: "Rejected",
       [requestService.STATUS.PROCESSING]: "Processing",
       [requestService.STATUS.READY]: "Ready for Pick-up",
-      [requestService.STATUS.RELEASED]: "Claimed",
+      [requestService.STATUS.RELEASED]: "Released",
       [requestService.STATUS.CANCELLED]: "Cancelled",
     };
     return labels[status] || status;
@@ -870,10 +895,20 @@ window.initializePortalDashboard = () => {
     reference.className = "student-request-summary-id";
     reference.textContent = `Request ID: ${request.id}`;
     copy.append(title, reference);
+    head.append(copy);
+
+    const statusActions = document.createElement("div");
+    statusActions.className = "student-request-status-actions";
     const status = document.createElement("span");
     status.className = `request-status-pill request-status-${requestService.statusTone(request.status)}`;
     status.append(createIcon(requestStatusIcon(request.status)), document.createTextNode(displayRequestStatus(request.status)));
-    head.append(copy, status);
+    const openButton = document.createElement("button");
+    openButton.type = "button";
+    openButton.className = "secondary-button student-request-open student-request-status-btn";
+    openButton.dataset.requestOpen = request.id;
+    openButton.textContent = "View Progress";
+    statusActions.append(status, openButton);
+    head.append(statusActions);
 
     const submitted = document.createElement("p");
     submitted.className = "student-request-list-meta";
@@ -881,14 +916,9 @@ window.initializePortalDashboard = () => {
 
     const actions = document.createElement("div");
     actions.className = "student-request-list-actions";
-    const openButton = document.createElement("button");
-    openButton.type = "button";
-    openButton.className = "secondary-button student-request-open";
-    openButton.dataset.requestOpen = request.id;
-    openButton.textContent = "View Progress";
-    actions.append(openButton);
+    actions.style.display = "none";
 
-    card.append(head, submitted, actions);
+    card.append(head, submitted);
     return card;
   }
 
@@ -914,7 +944,7 @@ window.initializePortalDashboard = () => {
   function renderRequests() {
     const list = activeAccount ? requestService.listForStudent(activeAccount.accountNumber) : [];
     if (selectedRequestId) {
-      const request = requestService.get(selectedRequestId);
+      const request = requestService.getForStudent(selectedRequestId, activeAccount.accountNumber);
       requestEmpty.hidden = true;
       requestList.replaceChildren();
       if (!request) {
@@ -932,7 +962,7 @@ window.initializePortalDashboard = () => {
   }
 
   function createRequest({ document: documentName, purpose, details } = {}, { nextPage = "requests", notify = true } = {}) {
-    if (!activeAccount) return null;
+    if (!activeAccount || !accounts.isSessionValid(activeAccount)) return null;
     const request = requestService.create({ student: activeAccount, document: documentName, purpose, details });
     if (!request) return null;
     renderRequests();
@@ -1047,33 +1077,24 @@ window.initializePortalDashboard = () => {
   });
 
   function assistantAnswer(question) {
-    const normalized = question.trim().toLowerCase();
-    const studentRequests = activeAccount ? requestService.listForStudent(activeAccount.accountNumber) : [];
-    let answer;
-    if (/status|track|my request/.test(normalized)) {
-      answer = studentRequests.length
-        ? `You have ${studentRequests.length} browser-local demo request${studentRequests.length === 1 ? "" : "s"} in My Request. Open My Request to check each status, appointment, staff remarks, and status history. These are not official registrar submissions.`
-        : "You have no requests in this browser yet. Open Services or Academic Records to create a document request, then check My Request for its Pending Review status. Official processing status will be available when the portal is connected to the registrar.";
-    } else if (/gradeslip|grade slip|grades/.test(normalized)) {
-      answer = "Open Services and choose Grade Slip. Complete Personal Information and Grade Slip Details, then review and submit your demo request. It will appear in My Request. Contact the registrar to confirm official requirements, fees, and release schedules.";
-    } else if (/id printing|student id/.test(normalized)) {
-      answer = "Open Services and choose ID Printing. Complete Personal Information, then choose an academic year, semester, date, and time in Printing Schedule. Review your information, choose Confirm Schedule, and select YES to save your demo request. The Schedule Complete screen shows your selected date and time, and the request appears in My Request.";
-    } else if (/regiform|registration|enroll/.test(normalized)) {
-      answer = "Open Services and select Registration Form. Check Personal Information, then select your academic year, semester, appointment date, and start time in Enrollment Details. The end time is calculated one hour later. Use Additional request details to change the purpose or copies, then Review & Submit to check your information. Choose Confirm Schedule and YES to create a demo request and open Schedule Complete with your selected date and time. Your draft saves automatically, and the confirmed request appears in My Request. For an official form, confirm your enrollment status and current requirements with the RTU Pasig registrar.";
-    } else if (/transcript|\btor\b|\bcoe\b|certificate|record/.test(normalized)) {
-      answer = "Open Academic Records to request a Transcript of Records (TOR), Certificate of Enrollment (COE), or gradeslip. Requirements, fees, and processing times depend on the document, so confirm the current details with the registrar.";
-    } else {
-      answer = "I can guide you through registration form requests, gradeslips, academic records, and checking your demo requests. Try asking “How can I request a regiform?” or open Services to choose a document.";
-    }
-    return answer;
+    return window.PortalFAQService.answer(question);
   }
+  document.addEventListener("portal:faqschanged", () => { if (assistantDialog.open && activeAccount?.role === "student") document.querySelector("#assistant-answer").textContent = assistantAnswer(document.querySelector("#assistant-question-text").textContent); });
 
   function askAssistant(question) {
-    const query = question.trim();
+    const query = (question || "").trim();
     if (!query) return;
-    document.querySelector("#assistant-question-text").textContent = query;
-    document.querySelector("#assistant-answer").textContent = assistantAnswer(query);
+    const questionText = document.querySelector("#assistant-question-text");
+    const answerText = document.querySelector("#assistant-answer");
+    questionText.textContent = query;
+    answerText.textContent = assistantAnswer(query);
     assistantDialog.showModal();
+    // Student-only AI layer: upgrade the instant FAQ answer when a provider is configured.
+    if (activeAccount?.role === "student" && window.PortalAIService) {
+      window.PortalAIService.answer(query)
+        .then((answer) => { if (typeof answer === "string" && answer.length > 0 && assistantDialog.open) answerText.textContent = answer; })
+        .catch((error) => console.debug("AI service unavailable, keeping FAQ answer:", error.message));
+    }
   }
 
   document.querySelector("#assistant-search").addEventListener("submit", (event) => {
@@ -1118,6 +1139,185 @@ window.initializePortalDashboard = () => {
 
   window.PortalRequests = Object.freeze({ create: createRequest });
   window.PortalAssistant = Object.freeze({ answer: assistantAnswer });
+
+  // Initialize chatbot for student role
+  window.initializeChatbot = () => {
+    const chatbotTrigger = document.querySelector('#chatbot-trigger');
+    const chatbotDialog = document.querySelector('#chatbot-dialog');
+    const requestService = window.PortalRequestService;
+    const activeAccount = window.PortalProfile?.snapshot()?.account;
+    
+    if (!chatbotTrigger || !chatbotDialog || !activeAccount) return;
+    
+    // Chatbot options data - selection-based
+    const chatbotOptionsData = [
+      {
+        id: 'status',
+        label: 'Check Request Status',
+        description: 'View the current status of your requests',
+        action: () => {
+          const requests = requestService.listForStudent(activeAccount.accountNumber);
+          if (requests.length === 0) {
+            document.getElementById('chatbot-question').textContent = 'Your Requests';
+            document.getElementById('chatbot-answer').innerHTML = 'You have no requests yet. Would you like to submit a new request?';
+            chatbotDialog.showModal();
+            return;
+          }
+          const request = requests[0];
+          document.getElementById('chatbot-question').textContent = `Request ${request.id} - ${request.documentType}`;
+          document.getElementById('chatbot-answer').innerHTML = `<strong>Status:</strong> ${requestService.statusTone(request.status)}<br><small>${requestService.statusDescription(request.status)}</small><br><strong>Progress:</strong> ${requestService.isActive(request.status) ? 'Active' : 'Completed'}<br><small>Submitted: ${new Date(request.submittedAt).toLocaleDateString()}</small>`;
+          chatbotDialog.showModal();
+        }
+      },
+      {
+        id: 'history',
+        label: 'View Request History',
+        description: 'See the lifecycle of your requests',
+        action: () => {
+          const requests = requestService.listForStudent(activeAccount.accountNumber);
+          if (requests.length === 0) {
+            document.getElementById('chatbot-question').textContent = 'Request History';
+            document.getElementById('chatbot-answer').textContent = 'You have no request history yet.';
+            chatbotDialog.showModal();
+            return;
+          }
+          const request = requests[0];
+          document.getElementById('chatbot-question').textContent = `Request ${request.id} - ${request.documentType}`;
+          const historyActions = request.history ? request.history.map(h => `${h.action} → ${h.newStatus}`).slice(0, 3).join(' · ') : 'No history';
+          document.getElementById('chatbot-answer').innerHTML = `<strong>Latest activity:</strong> ${historyActions}${request.history && request.history.length > 3 ? ` + ${request.history.length - 3} more updates` : ''}`;
+          chatbotDialog.showModal();
+        }
+      },
+      {
+        id: 'new-request',
+        label: 'Submit New Request',
+        description: 'Create a new document request',
+        action: () => {
+          const serviceMap = {
+            'gradeslip': '#/services/grade-slip',
+            'registration': '#/services/registration-form', 
+            'idprinting': '#/services/id-printing',
+            'transcript': '#/services',
+            'certificate': '#/services'
+          };
+          
+          document.getElementById('chatbot-question').textContent = 'New Request';
+          document.getElementById('chatbot-answer').innerHTML = 'Select a document type to request:<br><br>' +
+            '<button class="chatbot-option-btn" data-option="gradeslip">Grade Slip</button>' +
+            '<button class="chatbot-option-btn" data-option="registration">Registration Form</button>' +
+            '<button class="chatbot-option-btn" data-option="idprinting">ID Printing</button>' +
+            '<button class="chatbot-option-btn" data-option="transcript">Transcript of Records</button>' +
+            '<button class="chatbot-option-btn" data-option="certificate">Certificate of Enrollment</button>';
+          
+          // Add click handlers for option buttons
+          const optionButtons = document.querySelectorAll('.chatbot-option-btn');
+          optionButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+              const option = btn.dataset.option;
+              const hash = serviceMap[option] || '#/services';
+              window.location.hash = hash;
+              chatbotDialog.close();
+            });
+          });
+          
+          chatbotDialog.showModal();
+        }
+      },
+      {
+        id: 'cancel',
+        label: 'Cancel Request',
+        description: 'Cancel a pending request',
+        action: () => {
+          const requests = requestService.listForStudent(activeAccount.accountNumber);
+          const activeRequests = requests.filter(r => requestService.isActive(r.status));
+          if (activeRequests.length === 0) {
+            document.getElementById('chatbot-question').textContent = 'Cancel Request';
+            document.getElementById('chatbot-answer').textContent = 'You do not have any active requests that can be cancelled.';
+            chatbotDialog.showModal();
+            return;
+          }
+          document.getElementById('chatbot-question').textContent = 'Cancel Request';
+          document.getElementById('chatbot-answer').innerHTML = `Which request would you like to cancel?<br><br>${activeRequests.map(r => `<button class="chatbot-option-btn" data-request="${r.id}">${r.documentType} (${r.id})</button>`).join('')}`;
+          
+          const optionButtons = document.querySelectorAll('.chatbot-option-btn[data-request]');
+          optionButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+              const requestId = btn.dataset.request;
+              document.getElementById('chatbot-question').textContent = 'Cancel Request';
+              document.getElementById('chatbot-answer').innerHTML = `Enter reason for cancelling request ${requestId}:<br><br><textarea id="cancel-reason" rows="3" style="width:100%; padding: 8px; border: 1px solid var(--requests-line); border-radius: 8px; background: var(--requests-panel); color: var(--requests-ink);" required></textarea><br><button class="primary-button" id="confirm-cancel">Cancel Request</button>`;
+              
+              const confirmBtn = document.getElementById('confirm-cancel');
+              const originalAction = confirmBtn.onclick;
+              confirmBtn.onclick = () => {
+                const reason = document.getElementById('cancel-reason').value.trim();
+                if (reason) {
+                  try {
+                    requestService.studentCancel(requestId, activeAccount, reason);
+                    document.getElementById('chatbot-question').textContent = 'Request Cancelled';
+                    document.getElementById('chatbot-answer').textContent = 'Your request has been cancelled. The record remains in your history.';
+                    chatbotDialog.close();
+                    if (typeof renderRequests === 'function') renderRequests();
+                  } catch (e) {
+                    document.getElementById('chatbot-answer').textContent = `Error: ${e.message}`;
+                  }
+                }
+              };
+              chatbotDialog.showModal();
+            });
+          });
+          chatbotDialog.showModal();
+        }
+      }
+    ];
+    
+    // Render chatbot options
+    const chatbotOptions = document.getElementById('chatbot-options');
+    const chatbotConversation = document.getElementById('chatbot-conversation');
+    
+    function renderOptions() {
+      chatbotOptions.replaceChildren();
+      chatbotConversation.style.display = 'none';
+      chatbotOptions.style.display = 'grid';
+      
+      chatbotOptionsData.forEach(option => {
+        const btn = document.createElement('button');
+        btn.className = 'chatbot-option-btn';
+        btn.textContent = option.label;
+        btn.dataset.id = option.id;
+        btn.addEventListener('click', () => option.action());
+        chatbotOptions.append(btn);
+      });
+    }
+    
+    // Event listeners
+    chatbotTrigger.addEventListener('click', (e) => {
+      e.preventDefault();
+      renderOptions();
+      chatbotDialog.showModal();
+    });
+    
+    // Close dialog on overlay click
+    chatbotDialog.addEventListener('click', (e) => {
+      if (e.target === chatbotDialog || e.target.dataset.closeDialog) {
+        chatbotDialog.close();
+      }
+    });
+    
+    // Handle escape key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && chatbotDialog.open) {
+        chatbotDialog.close();
+      }
+    });
+    
+    // Initial render
+    renderOptions();
+  };
+  
+  // Initialize chatbot for students
+  if (activeAccount?.role === "student") {
+    initializeChatbot();
+  }
 
   const savedAccount = accounts.restoreSession();
   if (savedAccount?.role === "student") openDashboard(savedAccount);

@@ -21,19 +21,24 @@
 
       <form id="login-form" novalidate>
         <div class="field-group">
-          <label class="visually-hidden" id="account-label" for="account-number">Student Number</label>
-          <input class="form-control portal-input" id="account-number" name="username" type="text" placeholder="Student Number" autocomplete="username" required aria-describedby="account-error">
+          <label class="field-label" id="account-label" for="account-number">Student Number</label>
+          <input class="form-control portal-input" id="account-number" name="username" type="text" placeholder="e.g. 2020-12345" autocomplete="username" autocapitalize="none" spellcheck="false" required aria-describedby="account-error">
           <span class="field-error" id="account-error"></span>
         </div>
         <div class="field-group password-group">
-          <label class="visually-hidden" for="password">Password</label>
+          <label class="field-label" for="password">Password</label>
           <div class="password-field">
-            <input class="form-control portal-input" id="password" name="password" type="password" autocomplete="current-password" placeholder="Password" required aria-describedby="password-error">
+            <input class="form-control portal-input" id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required aria-describedby="password-error">
             <button class="password-toggle" id="password-toggle" type="button" aria-label="Show password" aria-pressed="false">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path class="eye-slash" d="m3 21 18-18"/></svg>
             </button>
           </div>
           <span class="field-error" id="password-error"></span>
+        </div>
+        <div class="privacy-consent">
+          <input class="privacy-consent-input" id="privacy-consent" name="privacy-consent" type="checkbox" aria-describedby="privacy-consent-error">
+          <label class="privacy-consent-label" for="privacy-consent">I have read and understand the <a class="text-link privacy-statement-link" href="#" data-open-dialog="privacy-dialog">Data Privacy Statement</a></label>
+          <span class="field-error" id="privacy-consent-error"></span>
         </div>
         <div class="forgot-row"><button class="text-link" type="button" data-open-dialog="recovery-dialog">Forgot Password?</button></div>
         <div class="login-action"><button class="btn login-button" type="submit">Login</button></div>
@@ -55,8 +60,8 @@
         <img class="assistant-mascot" src="assets/images/assistant.svg" alt="A friendly blue and gold robot assistant" width="96" height="112">
         <h2 id="assistant-title">NLP-Based Academic Services<br class="wide-break"> &amp; Records Assistant</h2>
       </div>
-      <p>NLP-Based Academic Services &amp; Records Assistant for Rizal Technological University - Pasig Branch</p>
-      <p>Your one-stop portal for academic services, records, and documents.</p>
+      <p>Ask about your grades, request records, and follow every document from request to release.</p>
+      <p>Students and staff sign in with their institutional number.</p>
     </div>
     <div class="brand-footer"><span class="status-dot" aria-hidden="true"></span> Your academic journey, made simpler.</div>
   </aside>

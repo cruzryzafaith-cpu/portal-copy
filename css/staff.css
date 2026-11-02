@@ -23,62 +23,11 @@
   color: #315fae;
 }
 
-.staff-sidebar-card {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  margin: 4px 0 16px;
-  padding: 12px;
-  border: 1px solid #ffffff14;
-  border-radius: 12px;
-  background: #ffffff0a;
-}
-
-.staff-sidebar-avatar {
-  display: grid;
-  place-items: center;
-  flex: 0 0 38px;
-  width: 38px;
-  height: 38px;
-  border: 1px solid #ffffff2e;
-  border-radius: 50%;
-  background: #ffffff16;
-  color: #ffdc7d;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: .4px;
-}
-
-.staff-sidebar-card div {
-  min-width: 0;
-}
-
-.staff-sidebar-card strong {
-  display: block;
-  overflow: hidden;
-  color: #fff;
-  font-size: 12.5px;
-  font-weight: 600;
-  line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.staff-sidebar-card small {
-  display: block;
-  overflow: hidden;
-  color: #a9bcda;
-  font-size: 10.5px;
-  line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .staff-nav-label {
   margin: 0 0 8px;
   padding: 0 15px;
-  color: #7f96bd;
-  font-size: 9.5px;
+  color: #9fb3d6;
+  font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 1.4px;
   text-transform: uppercase;
@@ -97,7 +46,6 @@
   text-align: center;
 }
 
-.staff-shell.sidebar-collapsed .staff-sidebar-card,
 .staff-shell.sidebar-collapsed .staff-nav-label,
 .staff-shell.sidebar-collapsed .staff-nav-badge {
   display: none;
@@ -157,7 +105,8 @@
 }
 
 .staff-welcome h2:focus,
-.staff-page-heading h2:focus {
+.staff-page-heading h2:focus,
+.staff-panel-heading h3:focus {
   outline: none;
 }
 
@@ -314,6 +263,12 @@
   gap: 20px;
   align-items: start;
   margin-top: 20px;
+}
+
+.staff-dashboard-grid > *,
+.staff-side-column > *,
+.staff-announcement-layout > * {
+  min-width: 0;
 }
 
 .staff-side-column {
@@ -639,13 +594,6 @@
   font-weight: 650;
   letter-spacing: -.7px;
   line-height: 1.3;
-}
-
-.staff-page-heading p {
-  margin: 0;
-  color: var(--dashboard-muted);
-  font-size: 14px;
-  line-height: 1.6;
 }
 
 .staff-count-pill {
@@ -1106,7 +1054,6 @@ html[data-theme="dark"] .staff-panel-heading p,
 html[data-theme="dark"] .staff-quick-button small,
 html[data-theme="dark"] .staff-volume-item header span,
 html[data-theme="dark"] .staff-empty,
-html[data-theme="dark"] .staff-page-heading p,
 html[data-theme="dark"] .staff-count-pill,
 html[data-theme="dark"] .staff-select,
 html[data-theme="dark"] .staff-dialog-grid dt,
@@ -1399,10 +1346,6 @@ html[data-theme="dark"] .staff-profile-avatar {
 
   .staff-page-heading h2 {
     font-size: 27px;
-  }
-
-  .staff-page-heading p {
-    font-size: 13px;
   }
 
   .staff-filter-tabs {

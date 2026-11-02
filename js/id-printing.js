@@ -457,7 +457,6 @@ window.initializeIdPrinting = () => {
       submitButton.disabled = false;
       resizeProgram();
       updateSchedule();
-      if (account && !hasDraft) saveDraft();
       showSavedTime();
     } else if (saveTimer !== undefined) saveDraft();
   });

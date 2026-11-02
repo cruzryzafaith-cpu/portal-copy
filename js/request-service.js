@@ -131,6 +131,7 @@
         actor: typeof entry.actor === "string" ? entry.actor : "",
         actorRole: entry.actorRole === "staff" || entry.actorRole === "student" ? entry.actorRole : "",
         staff: typeof entry.staff === "string" ? entry.staff : "",
+        staffId: typeof entry.staffId === "string" ? entry.staffId : "",
         remarks: typeof entry.remarks === "string" ? entry.remarks : "",
         timestamp: entry.timestamp,
       }));
@@ -184,6 +185,15 @@
       releasedAt: typeof record.releasedAt === "string" ? record.releasedAt : "",
       releasedBy: typeof record.releasedBy === "string" ? record.releasedBy : "",
       releaseVerification: typeof record.releaseVerification === "string" ? record.releaseVerification : "",
+      processing: {
+        checks: record.processing?.checks && typeof record.processing.checks === "object" ? clone(record.processing.checks) : {},
+        notes: Array.isArray(record.processing?.notes) ? clone(record.processing.notes) : [],
+        events: Array.isArray(record.processing?.events) ? clone(record.processing.events) : [],
+      },
+      notifications: Array.isArray(record.notifications) ? clone(record.notifications) : [],
+      recipientVerification: record.recipientVerification && typeof record.recipientVerification === "object" ? clone(record.recipientVerification) : null,
+      recipientVerifications: Array.isArray(record.recipientVerifications) ? clone(record.recipientVerifications) : [],
+      release: record.release && typeof record.release === "object" ? clone(record.release) : null,
       cancelledAt: typeof record.cancelledAt === "string" ? record.cancelledAt : "",
       cancelledBy: typeof record.cancelledBy === "string" ? record.cancelledBy : "",
       cancelReason: typeof record.cancelReason === "string" ? record.cancelReason : "",
@@ -219,7 +229,12 @@
       if (raw === null) return null;
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return null;
-      return parsed.filter(isStoredRecord).map(normalizeRecord);
+      const seen = new Set();
+      return parsed.filter(isStoredRecord).filter((record) => {
+        if (seen.has(record.id)) return false;
+        seen.add(record.id);
+        return true;
+      }).map(normalizeRecord);
     } catch {
       return null;
     }
@@ -336,8 +351,24 @@
 
   function listForStudent(studentNumber) {
     const number = String(studentNumber || "").trim();
-    if (!number) return [];
-    return listAll().filter((request) => request.studentNumber === number);
+    if (!number || !canReadStudent(number)) return [];
+    return listAll().filter((request) => request.studentNumber === number).map(studentView);
+  }
+
+  function canReadStudent(studentNumber) {
+    const staff = window.PortalStaffContext?.current()?.account;
+    const student = window.PortalProfile?.snapshot()?.account;
+    return staff?.role === "staff" || (student?.role === "student" && student.accountNumber === studentNumber);
+  }
+
+  function studentView(request) {
+    const result = clone(request);
+    delete result.processing;
+    delete result.recipientVerification;
+    delete result.recipientVerifications;
+    delete result.releaseVerification;
+    if (result.release) result.release = { reference: result.release.reference, timestamp: result.release.timestamp, copies: result.release.copies };
+    return result;
   }
 
   function get(id) {
@@ -346,7 +377,7 @@
 
   function getForStudent(id, studentNumber) {
     const request = get(id);
-    return request && request.studentNumber === studentNumber ? request : null;
+    return request && canReadStudent(studentNumber) && request.studentNumber === studentNumber ? studentView(request) : null;
   }
 
   function nextId(requests, year) {
@@ -427,11 +458,98 @@
   }
 
   function requireStaff(actor) {
-    if (actor?.role !== "staff" || !actorName(actor)) throw new Error("Only an authorized staff member can perform this action.");
+    const current = window.PortalStaffContext?.current();
+    if (actor?.role !== "staff" || !actorName(actor) || current?.account?.role !== "staff" || actor.accountNumber !== current.account.accountNumber) throw new Error("Only a signed-in authorized staff member can perform this action.");
+  }
+
+  function policyFor(request) {
+    return window.PortalDocumentPolicy?.services[request.documentType];
+  }
+
+  function preparationComplete(request) {
+    const policy = policyFor(request);
+    return Boolean(policy?.configured && policy.items.length && policy.items.every((item) => !item.required || (
+      request.processing?.checks?.[item.id]?.checked === true
+      && request.processing.checks[item.id].version === window.PortalDocumentPolicy.version
+    )));
+  }
+
+  function verificationComplete(request) {
+    const policy = window.PortalDocumentPolicy;
+    const verification = request.recipientVerification;
+    return Boolean(policy?.verification.configured && verification
+      && verification.version === policy.version
+      && policy.verification.methods.some((method) => method.id === verification.methodId)
+      && (verification.recipientType === "Requesting Student" || (policy.verification.allowRepresentative && verification.recipientType === "Authorized Representative"))
+      && policy.verification.releaseChecks.every((item) => verification.requirements?.includes(item.id)));
+  }
+
+  // Internal audit data stays separate from the student-visible lifecycle history.
+  function processingAction(id, actor, apply) {
+    requireStaff(actor);
+    const all = readAll();
+    const index = all.findIndex((request) => request.id === id);
+    if (index < 0) throw new Error("This request could not be found.");
+    const request = all[index];
+    if (![STATUS.PROCESSING, STATUS.READY].includes(request.status)) throw new Error("This action requires a Processing or Ready for Pickup request.");
+    const now = new Date().toISOString();
+    const event = apply(request, now);
+    if (!event) return { request: clone(request), persisted: !memoryAuthoritative };
+    request.updatedAt = now;
+    request.processing.events = [...(request.processing.events || []), { ...event, timestamp: now, actor: actorName(actor), staffId: actor.accountNumber }];
+    const persisted = writeAll(all, true);
+    notifyChange(request, persisted);
+    return { request: clone(request), persisted };
+  }
+
+  function savePreparationCheck(id, itemId, checked, actor) {
+    return processingAction(id, actor, (request, now) => {
+      const policy = policyFor(request);
+      if (request.status !== STATUS.PROCESSING) throw new Error("Preparation checks can only change while Processing.");
+      if (!policy?.configured || !policy.items.some((item) => item.id === itemId)) throw new Error("Preparation workflow requires approved configuration.");
+      const checks = request.processing.checks || {};
+      const wasComplete = preparationComplete(request);
+      const previous = checks[itemId];
+      if (previous?.checked === Boolean(checked) && previous.version === window.PortalDocumentPolicy.version) return null;
+      request.processing.checks = { ...checks, [itemId]: { checked: Boolean(checked), timestamp: now, actor: actorName(actor), staffId: actor.accountNumber, version: window.PortalDocumentPolicy.version } };
+      return { action: !wasComplete && preparationComplete(request) ? "Preparation Completed" : "Preparation Check Updated", remarks: `${policy.items.find((item) => item.id === itemId).label}: ${checked ? "complete" : "incomplete"}` };
+    });
+  }
+
+  function addProcessingNote(id, text, actor) {
+    const note = String(text || "").trim();
+    if (!note || note.length > 1000) throw new Error("Enter an internal note of 1–1,000 characters.");
+    return processingAction(id, actor, (request, now) => {
+      request.processing.notes = [...(request.processing.notes || []), { id: `NOTE-${id}-${(request.processing.notes || []).length + 1}`, text: note, actor: actorName(actor), staffId: actor.accountNumber, timestamp: now }];
+      return { action: "Internal Note Added", remarks: note };
+    });
+  }
+
+  function verifyRecipient(id, input, actor) {
+    return processingAction(id, actor, (request, now) => {
+      if (request.status !== STATUS.READY) throw new Error("Only Ready for Pickup requests can be verified.");
+      const policy = window.PortalDocumentPolicy;
+      const method = policy?.verification.methods.find((entry) => entry.id === input.methodId);
+      if (!policy?.verification.configured || !method) throw new Error("An approved identity verification method must be configured.");
+      if (input.confirmed !== true) throw new Error("Confirm that recipient verification was actually completed.");
+      const representative = input.recipientType === "Authorized Representative";
+      if (input.recipientType !== "Requesting Student" && !representative) throw new Error("Choose a valid recipient type.");
+      if (representative && !policy.verification.allowRepresentative) throw new Error("Representative collection is not configured.");
+      const recipientName = representative ? String(input.recipientName || "").trim() : request.studentName;
+      if (!recipientName || recipientName.length > 150) throw new Error("Enter a recipient name of at most 150 characters.");
+      const requirements = policy.verification.releaseChecks.map((item) => item.id);
+      if (!requirements.every((key) => input.requirements?.includes(key))) throw new Error("Complete configured release requirements.");
+      if (verificationComplete(request)) throw new Error("Recipient verification is already recorded. Release or close this request.");
+      const reference = `VER-${id}-${(request.processing.events || []).length + 1}`;
+      request.recipientVerification = { reference, recipientType: input.recipientType, recipientName, methodId: method.id, methodLabel: method.label, requirements, timestamp: now, actor: actorName(actor), staffId: actor.accountNumber, version: policy.version };
+      request.recipientVerifications = [...request.recipientVerifications, clone(request.recipientVerification)];
+      return { action: "Recipient Verified", remarks: `${input.recipientType} · ${method.label}`, reference };
+    });
   }
 
   function requireOwner(request, actor) {
-    if (actor?.role !== "student" || actor.accountNumber !== request.studentNumber) {
+    const current = window.PortalProfile?.snapshot()?.account;
+    if (actor?.role !== "student" || current?.role !== "student" || current.accountNumber !== actor.accountNumber || actor.accountNumber !== request.studentNumber) {
       throw new Error("You can only update your own requests.");
     }
   }
@@ -451,9 +569,8 @@
     if (requiresReason(newStatus) && !reason) {
       throw new Error(newStatus === STATUS.CORRECTION ? "Describe the information the student needs to correct." : newStatus === STATUS.REJECTED ? "Enter a reason for rejecting this request." : "Enter a reason for cancelling this request.");
     }
-    if (newStatus === STATUS.RELEASED && options.verification !== true) {
-      throw new Error("Confirm that the student identity or authorized collection details were verified.");
-    }
+    if (newStatus === STATUS.READY && !preparationComplete(request)) throw new Error("Complete all required checks under the current approved preparation configuration.");
+    if (newStatus === STATUS.RELEASED && (!verificationComplete(request) || options.handoverConfirmed !== true || request.release)) throw new Error("Release requires recorded recipient verification and explicit confirmation of the actual document handover.");
     const now = new Date().toISOString();
     const staffName = actorName(actor);
     const updated = {
@@ -476,15 +593,21 @@
       updated.staffRemarks = reason;
     } else if (newStatus === STATUS.PROCESSING) {
       updated.processingStartedAt = now;
-      if (remarks) updated.staffRemarks = remarks;
     } else if (newStatus === STATUS.READY) {
       updated.readyAt = now;
-      if (remarks) updated.staffRemarks = remarks;
     } else if (newStatus === STATUS.RELEASED) {
       updated.releasedAt = now;
       updated.releasedBy = staffName;
-      updated.releaseVerification = "Student identity or authorized collection details verified";
-      if (remarks) updated.staffRemarks = remarks;
+      updated.releaseVerification = request.recipientVerification.reference;
+      updated.release = {
+        reference: `REL-${request.id}`, requestId: request.id,
+        studentName: request.studentName, documentType: request.documentType,
+        copies: request.details.copies || null,
+        recipientType: request.recipientVerification.recipientType,
+        recipientName: request.recipientVerification.recipientName,
+        verificationReference: request.recipientVerification.reference,
+        timestamp: now, actor: staffName, staffId: actor.accountNumber, handoverConfirmed: true,
+      };
     } else if (newStatus === STATUS.CANCELLED) {
       updated.cancelledAt = now;
       updated.cancelledBy = staffName;
@@ -497,9 +620,17 @@
       actor: staffName,
       actorRole: "staff",
       staff: staffName,
-      remarks: reason || remarks || (newStatus === STATUS.RELEASED ? "Student identity or authorized collection details verified." : ""),
+      staffId: actor.accountNumber,
+      remarks: [STATUS.PROCESSING, STATUS.READY, STATUS.RELEASED].includes(newStatus) ? "" : reason || remarks,
       timestamp: now,
     }];
+    if ([STATUS.PROCESSING, STATUS.READY, STATUS.RELEASED].includes(newStatus)) {
+      const message = newStatus === STATUS.READY
+        ? `Your ${request.documentType} request is ready for pickup. Please review your appointment details and follow the university's collection instructions.`
+        : newStatus === STATUS.PROCESSING ? `Processing has started for your ${request.documentType} request.`
+          : `Your ${request.documentType} request has been recorded as released after staff confirmed handover.`;
+      updated.notifications = [...request.notifications, { id: `${id}-${statusTone(newStatus)}`, message, timestamp: now }];
+    }
     all[index] = updated;
     const persisted = writeAll(all, true);
     notifyChange(updated, persisted);
@@ -592,7 +723,18 @@
     notifyChange(null, true);
   });
 
+  function sourceInfo() {
+    if (memoryAuthoritative) return { available: true, memoryOnly: true, invalidRecords: 0 };
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (raw === null) return { available: true, memoryOnly: false, invalidRecords: 0 };
+      const records = JSON.parse(raw);
+      return { available: Array.isArray(records), memoryOnly: false, invalidRecords: Array.isArray(records) ? records.filter((record) => !isStoredRecord(record)).length : 0 };
+    } catch { return { available: false, memoryOnly: false, invalidRecords: 0 }; }
+  }
+
   window.PortalRequestService = Object.freeze({
+    sourceInfo,
     STORAGE_KEY,
     STATUS,
     STATUSES,
@@ -613,6 +755,11 @@
     getForStudent,
     create,
     updateStatus,
+    preparationComplete,
+    verificationComplete,
+    savePreparationCheck,
+    addProcessingNote,
+    verifyRecipient,
     studentResubmit,
     studentCancel,
     summary,

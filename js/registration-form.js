@@ -32,6 +32,7 @@ window.initializeRegistrationForm = () => {
   const endTimeField = view.querySelector("#registration-end-time");
   const timeRangeLabel = view.querySelector("#registration-time-range");
   const personalNames = ["fullName", "program", "yearLevel", "semester"];
+  const programField = view.querySelector("#registration-program");
   const scheduleNames = new Set(["appointmentDate", "appointmentStart"]);
   const limits = { fullName: 100, program: 100, yearLevel: 30, semester: 40, academicYear: 9, requestedSemester: 40, appointmentDate: 10, appointmentStart: 5, purpose: 80, copies: 2, notes: 500 };
   let account = null;
@@ -52,8 +53,19 @@ window.initializeRegistrationForm = () => {
   }
 
   function values(trim = false) {
-    return Object.fromEntries(fields.map((input) => [input.name, trim ? input.value.trim() : input.value]));
+    return Object.fromEntries(fields.map((input) => {
+      const value = input.name === "program" ? input.value.replace(/\r?\n/g, " ") : input.value;
+      return [input.name, trim ? value.trim() : value];
+    }));
   }
+
+  function resizeProgram() {
+    if (view.hidden || panels[0].hidden) return;
+    programField.style.height = "auto";
+    programField.style.height = `${programField.scrollHeight + 2}px`;
+  }
+  window.addEventListener("resize", resizeProgram);
+  document.addEventListener("portal:layoutchange", resizeProgram);
 
   function localDateString(date = new Date()) {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -134,7 +146,6 @@ window.initializeRegistrationForm = () => {
     input.value = value;
     input.setCustomValidity("");
     input.removeAttribute("aria-invalid");
-    if (input.name === "program") input.title = value;
   }
 
   function clearErrors() {
@@ -203,6 +214,7 @@ window.initializeRegistrationForm = () => {
     submitButton.hidden = step !== 3;
     reviewDisclaimer.hidden = step !== 3;
     consent.checked = false;
+    resizeProgram();
     updateSchedule();
     if (step === 3) renderReview();
     if (save) saveDraft();
@@ -362,7 +374,7 @@ window.initializeRegistrationForm = () => {
       consent.checked = false;
       clearErrors();
       if (input === startTimeField || input === dateField) updateSchedule();
-      if (input.name === "program") input.title = input.value;
+      if (input === programField) resizeProgram();
       if (input.name === "semester") {
         if (!form.elements.requestedSemester.value || form.elements.requestedSemester.value === previousSemester) setValue(form.elements.requestedSemester, input.value);
         previousSemester = input.value;
@@ -479,6 +491,7 @@ window.initializeRegistrationForm = () => {
     const greeting = chat.querySelector("[data-registration-greeting]");
     if (greeting) greeting.textContent = event.detail.values.fullName || account.fullName;
     if (changed) {
+      resizeProgram();
       if (confirmation.open) confirmation.close("profilechange");
       clearErrors();
       if (currentStep === 3) renderReview();
@@ -491,8 +504,8 @@ window.initializeRegistrationForm = () => {
       return;
     }
     if (event.detail === "registration-form") {
+      resizeProgram();
       updateSchedule();
-      if (account && !hasDraft) saveDraft();
       showSavedTime();
     } else if (saveTimer !== undefined) saveDraft();
   });
